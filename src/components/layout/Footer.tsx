@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { Twitter, Github, Discord, ArrowRight } from 'lucide-react';
+import { Twitter, Github, MessageSquare, ArrowRight } from 'lucide-react';
 
 const Footer = () => {
   return (
@@ -27,7 +27,7 @@ const Footer = () => {
                 <Github size={20} />
               </a>
               <a href="#" className="text-white/70 hover:text-arthanet-blue transition-colors">
-                <Discord size={20} />
+                <MessageSquare size={20} />
               </a>
             </div>
           </div>
