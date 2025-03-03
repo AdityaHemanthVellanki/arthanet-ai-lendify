@@ -1,11 +1,10 @@
-
 import React, { useEffect, useState } from 'react';
 import Navbar from '@/components/layout/Navbar';
 import Footer from '@/components/layout/Footer';
 import GlassCard from '@/components/ui/GlassCard';
 import ConnectWalletButton from '@/components/ui/ConnectWalletButton';
 import { motion } from 'framer-motion';
-import { Robot, Brain, TrendingUp, BinaryTree, Maximize, ArrowRight, Play, Info, Link, Shield } from 'lucide-react';
+import { Bot, Brain, TrendingUp, GitBranch, Maximize, ArrowRight, Play, Info, Link, Shield } from 'lucide-react';
 import { toast } from 'sonner';
 import walletService from '@/services/walletService';
 
@@ -176,7 +175,7 @@ const AIAgents = () => {
                       <ul className="space-y-2">
                         {agent.capabilities.map((capability, i) => (
                           <li key={i} className="flex items-start">
-                            <BinaryTree className="h-4 w-4 text-arthanet-blue mr-2 mt-1 flex-shrink-0" />
+                            <GitBranch className="h-4 w-4 text-arthanet-blue mr-2 mt-1 flex-shrink-0" />
                             <span className="text-sm text-white/70">{capability}</span>
                           </li>
                         ))}
@@ -259,7 +258,7 @@ const AIAgents = () => {
                   {
                     title: "Automated Execution",
                     description: "Smart contracts execute the AI-recommended strategies with optimal gas timing and slippage protection.",
-                    icon: <Robot className="h-5 w-5 text-white" />
+                    icon: <Bot className="h-5 w-5 text-white" />
                   }
                 ].map((step, index) => (
                   <motion.div 
@@ -305,7 +304,7 @@ const AIAgents = () => {
                     onClick={() => handleAgentInteraction('AI Auto-Lender')}
                     className="inline-flex items-center bg-blue-purple-gradient hover:opacity-90 transition-all duration-300 text-white font-medium rounded-lg px-6 py-3"
                   >
-                    <Robot className="mr-2 h-4 w-4" />
+                    <Bot className="mr-2 h-4 w-4" />
                     Deploy AI Agent
                   </button>
                 )}
