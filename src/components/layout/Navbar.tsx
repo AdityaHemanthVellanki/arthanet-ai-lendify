@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import ConnectWalletButton from '@/components/ui/ConnectWalletButton';
@@ -26,7 +25,6 @@ const Navbar = () => {
     { name: 'Credit Score', path: '/credit-score' },
     { name: 'How It Works', path: '/how-it-works' },
     { name: 'AI Agents', path: '/ai-agents' },
-    { name: 'Blog', path: '/blog' },
   ];
 
   return (

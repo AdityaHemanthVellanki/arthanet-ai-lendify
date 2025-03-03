@@ -1,9 +1,10 @@
-
 import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Wallet, ChevronDown, LogOut, Copy, ExternalLink } from 'lucide-react';
 import { toast } from 'sonner';
+import { useNavigate } from 'react-router-dom';
 import walletService, { WalletInfo } from '@/services/walletService';
+import creditScoreService from '@/services/creditScoreService';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -15,10 +16,18 @@ import {
 const ConnectWalletButton = () => {
   const [isConnecting, setIsConnecting] = useState(false);
   const [walletInfo, setWalletInfo] = useState<WalletInfo | null>(null);
+  const navigate = useNavigate();
 
   useEffect(() => {
     const unsubscribe = walletService.subscribe((wallet) => {
       setWalletInfo(wallet);
+      
+      // If wallet is connected, navigate to credit score page and start generating score
+      if (wallet) {
+        navigate('/credit-score');
+        // Start generating credit score
+        creditScoreService.generateCreditScore(wallet);
+      }
     });
 
     // Check if wallet is already connected
@@ -30,7 +39,7 @@ const ConnectWalletButton = () => {
     return () => {
       unsubscribe();
     };
-  }, []);
+  }, [navigate]);
 
   const handleConnect = async () => {
     setIsConnecting(true);
