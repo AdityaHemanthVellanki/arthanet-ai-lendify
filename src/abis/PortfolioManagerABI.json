@@ -1,0 +1,143 @@
+
+[
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "userAddress",
+        "type": "address"
+      }
+    ],
+    "name": "getUserPortfolio",
+    "outputs": [
+      {
+        "components": [
+          {
+            "internalType": "uint256",
+            "name": "totalValueUSD",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "riskScore",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "dailyYield",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "weeklyYield",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "monthlyYield",
+            "type": "uint256"
+          }
+        ],
+        "internalType": "struct PortfolioManager.Portfolio",
+        "name": "",
+        "type": "tuple"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "userAddress",
+        "type": "address"
+      }
+    ],
+    "name": "getPortfolioAssets",
+    "outputs": [
+      {
+        "components": [
+          {
+            "internalType": "address",
+            "name": "assetAddress",
+            "type": "address"
+          },
+          {
+            "internalType": "string",
+            "name": "assetName",
+            "type": "string"
+          },
+          {
+            "internalType": "string",
+            "name": "assetType",
+            "type": "string"
+          },
+          {
+            "internalType": "uint256",
+            "name": "balance",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "valueUSD",
+            "type": "uint256"
+          }
+        ],
+        "internalType": "struct PortfolioManager.Asset[]",
+        "name": "",
+        "type": "tuple[]"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "userAddress",
+        "type": "address"
+      }
+    ],
+    "name": "rebalancePortfolio",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "userAddress",
+        "type": "address"
+      },
+      {
+        "components": [
+          {
+            "internalType": "string",
+            "name": "riskTolerance",
+            "type": "string"
+          },
+          {
+            "internalType": "bool",
+            "name": "autoRebalance",
+            "type": "bool"
+          },
+          {
+            "internalType": "uint256",
+            "name": "maxGasFee",
+            "type": "uint256"
+          }
+        ],
+        "internalType": "struct PortfolioManager.Settings",
+        "name": "settings",
+        "type": "tuple"
+      }
+    ],
+    "name": "updatePortfolioSettings",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  }
+]

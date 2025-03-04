@@ -1,0 +1,103 @@
+
+[
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "userAddress",
+        "type": "address"
+      }
+    ],
+    "name": "getRiskMetrics",
+    "outputs": [
+      {
+        "components": [
+          {
+            "internalType": "uint256",
+            "name": "overallRiskScore",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "liquidationRisk",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "volatilityRisk",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "protocolRisk",
+            "type": "uint256"
+          }
+        ],
+        "internalType": "struct RiskAnalyzer.RiskMetrics",
+        "name": "",
+        "type": "tuple"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "userAddress",
+        "type": "address"
+      }
+    ],
+    "name": "getCollateralHealth",
+    "outputs": [
+      {
+        "components": [
+          {
+            "internalType": "address",
+            "name": "positionAddress",
+            "type": "address"
+          },
+          {
+            "internalType": "string",
+            "name": "protocol",
+            "type": "string"
+          },
+          {
+            "internalType": "uint256",
+            "name": "currentRatio",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "minRatio",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "liquidationPrice",
+            "type": "uint256"
+          }
+        ],
+        "internalType": "struct RiskAnalyzer.CollateralPosition[]",
+        "name": "",
+        "type": "tuple[]"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "userAddress",
+        "type": "address"
+      }
+    ],
+    "name": "runRiskAnalysis",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  }
+]

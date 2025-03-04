@@ -7,7 +7,8 @@ import {
   TrendingUp,
   BarChart3,
   Activity,
-  RefreshCw
+  RefreshCw,
+  Loader2
 } from 'lucide-react';
 import {
   Collapsible,
@@ -38,6 +39,7 @@ const DefiPositionsComponent: React.FC<DefiPositionsProps> = ({ forceWalletConne
   const [isOpen, setIsOpen] = useState(true);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isFirstLoad, setIsFirstLoad] = useState(true);
   
   // Get positions when wallet address changes
   useEffect(() => {
@@ -50,18 +52,31 @@ const DefiPositionsComponent: React.FC<DefiPositionsProps> = ({ forceWalletConne
         
         try {
           console.log("Fetching DeFi positions for address:", walletInfo.address);
-          const defiPositions = await aiAgentService.fetchDefiPositions(walletInfo.address);
-          setPositions(defiPositions);
-          console.log("Positions loaded:", defiPositions.length);
+          // Check if we already have positions in memory
+          const cachedPositions = aiAgentService.getDefiPositions(walletInfo.address);
+          
+          if (cachedPositions.length > 0) {
+            console.log("Using cached positions:", cachedPositions.length);
+            setPositions(cachedPositions);
+          } else {
+            console.log("Fetching positions from blockchain");
+            const defiPositions = await aiAgentService.fetchDefiPositions(walletInfo.address);
+            setPositions(defiPositions);
+            console.log("Positions loaded:", defiPositions.length);
+          }
         } catch (error) {
           console.error("Error fetching on-chain positions:", error);
           setPositions([]);
+        } finally {
+          setIsLoading(false);
+          setIsFirstLoad(false);
         }
       } else {
         setWalletAddress(null);
         setPositions([]);
+        setIsLoading(false);
+        setIsFirstLoad(false);
       }
-      setIsLoading(false);
     };
     
     // Fetch data immediately
@@ -70,19 +85,22 @@ const DefiPositionsComponent: React.FC<DefiPositionsProps> = ({ forceWalletConne
     // Subscribe to wallet changes
     const unsubscribe = walletService.subscribe((wallet) => {
       if (wallet) {
-        setWalletAddress(wallet.address);
-        fetchOnChainData();
+        if (wallet.address !== walletAddress) {
+          setWalletAddress(wallet.address);
+          setIsFirstLoad(true);
+          fetchOnChainData();
+        }
       } else {
         setWalletAddress(null);
         setPositions([]);
+        setIsLoading(false);
       }
-      setIsLoading(false);
     });
     
     return () => {
       unsubscribe();
     };
-  }, [forceWalletConnected]);
+  }, [forceWalletConnected, walletAddress]);
   
   // Subscribe to agent service updates
   useEffect(() => {
@@ -91,11 +109,10 @@ const DefiPositionsComponent: React.FC<DefiPositionsProps> = ({ forceWalletConne
     const unsubscribe = aiAgentService.subscribe((address) => {
       if (address === walletAddress) {
         console.log("Agent service updated, refreshing positions");
-        aiAgentService.getDefiPositions(address).length > 0 
-          ? setPositions(aiAgentService.getDefiPositions(address))
-          : aiAgentService.fetchDefiPositions(address).then(positions => {
-              setPositions(positions);
-            });
+        const cachedPositions = aiAgentService.getDefiPositions(address);
+        if (cachedPositions.length > 0) {
+          setPositions(cachedPositions);
+        }
       }
     });
     
@@ -111,7 +128,7 @@ const DefiPositionsComponent: React.FC<DefiPositionsProps> = ({ forceWalletConne
     setIsRefreshing(true);
     try {
       await aiAgentService.forceRefreshPositions(walletAddress);
-      const updatedPositions = await aiAgentService.fetchDefiPositions(walletAddress);
+      const updatedPositions = aiAgentService.getDefiPositions(walletAddress);
       setPositions(updatedPositions);
     } catch (error) {
       console.error("Error refreshing positions:", error);
@@ -120,11 +137,14 @@ const DefiPositionsComponent: React.FC<DefiPositionsProps> = ({ forceWalletConne
     }
   };
   
-  if (isLoading) {
+  if (isLoading && isFirstLoad) {
     return (
       <div className="glass-card p-6 text-center">
-        <Activity className="h-10 w-10 mx-auto mb-2 text-arthanet-blue animate-pulse" />
+        <Loader2 className="h-10 w-10 mx-auto mb-2 text-arthanet-blue animate-spin" />
         <p className="text-white/70">Loading on-chain data...</p>
+        <p className="text-sm text-white/50 mt-2">
+          Scanning blockchain for your positions
+        </p>
       </div>
     );
   }
@@ -144,9 +164,9 @@ const DefiPositionsComponent: React.FC<DefiPositionsProps> = ({ forceWalletConne
     return (
       <div className="glass-card p-6 text-center">
         <Activity className="h-10 w-10 mx-auto mb-2 text-arthanet-blue opacity-70" />
-        <p className="text-white/70">Scanning for DeFi positions...</p>
+        <p className="text-white/70">No DeFi positions found</p>
         <p className="text-sm text-white/50 mt-2">
-          We're checking multiple protocols for your positions
+          We've checked multiple protocols but didn't find any active positions
         </p>
         <Button 
           className="mt-4 bg-blue-purple-gradient hover:opacity-90 text-white"
@@ -155,7 +175,7 @@ const DefiPositionsComponent: React.FC<DefiPositionsProps> = ({ forceWalletConne
         >
           {isRefreshing ? (
             <>
-              <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               Scanning...
             </>
           ) : (
@@ -219,7 +239,7 @@ const DefiPositionsComponent: React.FC<DefiPositionsProps> = ({ forceWalletConne
               disabled={isRefreshing}
             >
               {isRefreshing ? (
-                <RefreshCw className="h-4 w-4 animate-spin" />
+                <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
                 <RefreshCw className="h-4 w-4" />
               )}

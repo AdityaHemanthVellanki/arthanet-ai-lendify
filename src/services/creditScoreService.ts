@@ -1,421 +1,181 @@
 
-import { toast } from 'sonner';
 import { ethers } from 'ethers';
+import { toast } from 'sonner';
 import walletService, { WalletInfo } from './walletService';
+import CreditScoreABI from '../abis/CreditScoreABI.json';
+
+// Credit score contract address - would typically come from environment variables
+const CREDIT_SCORE_CONTRACT_ADDRESS = '0x123abc456def789ghi012jkl345mno678pqr'; // Replace with actual contract address
+
+export interface CreditScoreFactor {
+  category: string;
+  score: number;
+  impact: 'positive' | 'negative' | 'neutral';
+  description: string;
+}
 
 export interface CreditScoreData {
   score: number;
-  riskLevel: 'High' | 'Medium' | 'Low';
-  factors: {
-    category: string;
-    score: number;
-    description: string;
-    impact: 'positive' | 'negative' | 'neutral';
-  }[];
+  riskLevel: string;
+  factors: CreditScoreFactor[];
   recommendations: string[];
   lastUpdated: Date;
 }
 
-const erc20ABI = [
-  {
-    "constant": true,
-    "inputs": [{"name": "_owner", "type": "address"}],
-    "name": "balanceOf",
-    "outputs": [{"name": "balance", "type": "uint256"}],
-    "type": "function"
-  }
-];
-
-const tokenAddresses = {
-  USDC: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
-  USDT: '0xdAC17F958D2ee523a2206206994597C13D831ec7',
-  DAI: '0x6B175474E89094C44Da98b954EedeAC495271d0F',
-  WETH: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2'
-};
-
-const aaveLendingPoolABI = [
-  {
-    "inputs": [{"internalType": "address", "name": "user", "type": "address"}],
-    "name": "getUserAccountData",
-    "outputs": [
-      {"internalType": "uint256", "name": "totalCollateralETH", "type": "uint256"},
-      {"internalType": "uint256", "name": "totalDebtETH", "type": "uint256"},
-      {"internalType": "uint256", "name": "availableBorrowsETH", "type": "uint256"},
-      {"internalType": "uint256", "name": "currentLiquidationThreshold", "type": "uint256"},
-      {"internalType": "uint256", "name": "ltv", "type": "uint256"},
-      {"internalType": "uint256", "name": "healthFactor", "type": "uint256"}
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  }
-];
-
-const compoundComptrollerABI = [
-  {
-    "constant": true,
-    "inputs": [{"name": "account", "type": "address"}],
-    "name": "getAccountLiquidity",
-    "outputs": [
-      {"name": "error", "type": "uint256"},
-      {"name": "liquidity", "type": "uint256"},
-      {"name": "shortfall", "type": "uint256"}
-    ],
-    "type": "function"
-  }
-];
-
-const protocolAddresses = {
-  aaveLendingPool: '0x7d2768dE32b0b80b7a3454c06BdAc94A69DDc7A9', // Mainnet Aave V2
-  compoundComptroller: '0x3d9819210A31b4961b30EF54bE2aeD79B9c9Cd3B' // Mainnet Compound
-};
-
 class CreditScoreService {
-  private creditScoreCache: Map<string, CreditScoreData> = new Map();
-  private isGenerating: boolean = false;
-  private provider: ethers.Provider | null = null;
-
-  constructor() {
-    this.initProvider();
+  private creditScores: Record<string, CreditScoreData> = {};
+  private isGenerating: Record<string, boolean> = {};
+  
+  // Get cached credit score
+  getCachedCreditScore(walletAddress: string): CreditScoreData | null {
+    return this.creditScores[walletAddress] || null;
   }
-
-  private initProvider() {
-    if (typeof window !== 'undefined' && window.ethereum) {
-      this.provider = new ethers.BrowserProvider(window.ethereum);
-    }
-  }
-
-  public async generateCreditScore(walletInfo: WalletInfo): Promise<CreditScoreData | null> {
-    if (this.isGenerating) {
-      toast.info('Credit score generation already in progress');
+  
+  // Generate credit score from blockchain data
+  async generateCreditScore(walletInfo: WalletInfo): Promise<CreditScoreData | null> {
+    if (!walletInfo || !walletInfo.address) {
+      toast.error('Wallet not connected');
       return null;
     }
-
-    if (this.creditScoreCache.has(walletInfo.address)) {
-      return this.creditScoreCache.get(walletInfo.address)!;
+    
+    const walletAddress = walletInfo.address;
+    
+    // Prevent multiple generations at once
+    if (this.isGenerating[walletAddress]) {
+      toast.info('Credit score generation is already in progress');
+      return null;
     }
-
-    this.isGenerating = true;
-    toast.info('Analyzing on-chain data for credit score generation');
-
+    
+    this.isGenerating[walletAddress] = true;
+    
     try {
-      if (!this.provider) {
-        this.initProvider();
-        if (!this.provider) {
-          throw new Error('Ethereum provider not available');
-        }
+      toast.info('Generating your DeFi credit score...', {
+        description: 'Analyzing on-chain data and transaction history'
+      });
+      
+      // Check if wallet is connected to a supported network
+      const isNetworkSupported = await walletService.isNetworkSupported();
+      if (!isNetworkSupported) {
+        toast.error('Unsupported network', {
+          description: 'Please connect to Ethereum Mainnet, Goerli, or Sepolia testnet'
+        });
+        this.isGenerating[walletAddress] = false;
+        return null;
       }
-
-      const walletAge = await this.getWalletAge(walletInfo.address);
-      const tokenBalances = await this.getTokenBalances(walletInfo.address);
-      const defiPositions = await this.getDefiPositions(walletInfo.address);
-      const txCount = await this.provider.getTransactionCount(walletInfo.address);
-
-      // Here's the fix - we must await the result of calculateScore
-      const creditScoreData = await this.calculateScore(
-        walletInfo.address,
-        walletAge,
-        tokenBalances,
-        defiPositions,
-        txCount
+      
+      // Get the contract instance
+      const provider = walletService.getProvider();
+      if (!provider) {
+        throw new Error('No provider available');
+      }
+      
+      const contract = new ethers.Contract(
+        CREDIT_SCORE_CONTRACT_ADDRESS,
+        CreditScoreABI,
+        provider
       );
-
-      this.creditScoreCache.set(walletInfo.address, creditScoreData);
-      toast.success('Credit score successfully generated!');
-      return creditScoreData;
+      
+      // Call the generate credit score function
+      const signer = walletService.getSigner();
+      if (!signer) {
+        throw new Error('No signer available');
+      }
+      
+      const contractWithSigner = contract.connect(signer);
+      const tx = await contractWithSigner.generateCreditScore(walletAddress);
+      
+      // Show transaction submitted toast
+      toast.info('Credit score calculation submitted', {
+        description: 'Transaction has been sent to the blockchain'
+      });
+      
+      // Wait for transaction confirmation
+      await tx.wait();
+      
+      // Now fetch the credit score details
+      const scoreData = await this.fetchCreditScoreFromBlockchain(walletAddress);
+      
+      // Update cached credit score
+      this.creditScores[walletAddress] = scoreData;
+      
+      toast.success('Credit score generated successfully', {
+        description: `Your DeFi credit score is ${scoreData.score}`
+      });
+      
+      return scoreData;
     } catch (error) {
       console.error('Error generating credit score:', error);
-      toast.error('Failed to generate credit score. Please try again later.');
+      
+      // If it's a contract interaction error, try to fetch the score directly
+      // as it might have been generated before
+      try {
+        const existingScore = await this.fetchCreditScoreFromBlockchain(walletAddress);
+        if (existingScore) {
+          this.creditScores[walletAddress] = existingScore;
+          return existingScore;
+        }
+      } catch (fetchError) {
+        console.error('Error fetching existing credit score:', fetchError);
+      }
+      
+      toast.error('Failed to generate credit score', {
+        description: error instanceof Error ? error.message : 'Unknown error occurred'
+      });
+      
       return null;
     } finally {
-      this.isGenerating = false;
+      this.isGenerating[walletAddress] = false;
     }
   }
-
-  private async getWalletAge(address: string): Promise<number> {
-    try {
-      const txCount = await this.provider?.getTransactionCount(address);
-      return txCount || 0;
-    } catch (error) {
-      console.error('Error getting wallet age:', error);
-      return 0;
-    }
-  }
-
-  private async getTokenBalances(address: string): Promise<Record<string, number>> {
-    const balances: Record<string, number> = {};
-    
-    try {
-      const ethBalance = await this.provider?.getBalance(address);
-      balances.ETH = ethBalance ? Number(ethers.formatEther(ethBalance)) : 0;
-      
-      for (const [symbol, tokenAddress] of Object.entries(tokenAddresses)) {
-        const contract = new ethers.Contract(tokenAddress, erc20ABI, this.provider);
-        const balance = await contract.balanceOf(address);
-        
-        const decimals = symbol === 'USDT' ? 6 : 18;
-        balances[symbol] = Number(ethers.formatUnits(balance, decimals));
-      }
-    } catch (error) {
-      console.error('Error getting token balances:', error);
+  
+  // Fetch credit score data from blockchain
+  private async fetchCreditScoreFromBlockchain(walletAddress: string): Promise<CreditScoreData> {
+    const provider = walletService.getProvider();
+    if (!provider) {
+      throw new Error('No provider available');
     }
     
-    return balances;
-  }
-
-  private async getDefiPositions(address: string): Promise<any> {
-    const positions: any = {
-      aave: null,
-      compound: null
-    };
-    
-    try {
-      const aaveContract = new ethers.Contract(
-        protocolAddresses.aaveLendingPool, 
-        aaveLendingPoolABI,
-        this.provider
-      );
-      
-      const aaveData = await aaveContract.getUserAccountData(address);
-      positions.aave = {
-        collateral: Number(ethers.formatEther(aaveData.totalCollateralETH)),
-        debt: Number(ethers.formatEther(aaveData.totalDebtETH)),
-        healthFactor: Number(ethers.formatEther(aaveData.healthFactor))
-      };
-      
-      const compoundContract = new ethers.Contract(
-        protocolAddresses.compoundComptroller,
-        compoundComptrollerABI,
-        this.provider
-      );
-      
-      const compoundData = await compoundContract.getAccountLiquidity(address);
-      positions.compound = {
-        error: Number(compoundData.error),
-        liquidity: Number(ethers.formatEther(compoundData.liquidity)),
-        shortfall: Number(ethers.formatEther(compoundData.shortfall))
-      };
-    } catch (error) {
-      console.error('Error getting DeFi positions:', error);
-    }
-    
-    return positions;
-  }
-
-  private async calculateScore(
-    address: string,
-    walletAge: number,
-    tokenBalances: Record<string, number>,
-    defiPositions: any,
-    txCount: number
-  ): Promise<CreditScoreData> {
-    const ethPrice = await walletService.getEthPrice();
-    
-    const ageActivityScore = Math.min(
-      100,
-      (walletAge * 5) + (txCount / 10)
+    const contract = new ethers.Contract(
+      CREDIT_SCORE_CONTRACT_ADDRESS,
+      CreditScoreABI,
+      provider
     );
     
-    const totalBalance = 
-      (tokenBalances.ETH * ethPrice) +
-      (tokenBalances.USDC || 0) +
-      (tokenBalances.USDT || 0) +
-      (tokenBalances.DAI || 0) +
-      (tokenBalances.WETH * ethPrice || 0);
+    // Fetch basic score data
+    const scoreDetails = await contract.getCreditScoreDetails(walletAddress);
     
-    const balanceScore = Math.min(100, totalBalance / 100);
+    // Fetch score factors
+    const factors = await contract.getCreditFactors(walletAddress);
     
-    let defiScore = 0;
-    let hasLoanRepayment = false;
+    // Fetch recommendations
+    const recommendations = await contract.getRecommendations(walletAddress);
     
-    if (defiPositions.aave && defiPositions.aave.collateral > 0) {
-      defiScore += 40;
-      
-      if (defiPositions.aave.debt > 0) {
-        hasLoanRepayment = true;
-        
-        if (defiPositions.aave.healthFactor > 2) {
-          defiScore += 20;
-        }
-      }
-    }
+    // Process the data
+    const formattedFactors: CreditScoreFactor[] = factors.map((factor: any) => ({
+      category: factor.category,
+      score: Number(factor.score),
+      impact: factor.impact.toLowerCase() as 'positive' | 'negative' | 'neutral',
+      description: factor.description
+    }));
     
-    if (defiPositions.compound && defiPositions.compound.liquidity > 0) {
-      defiScore += 40;
-      
-      if (defiPositions.compound.shortfall === 0 && defiPositions.compound.error === 0) {
-        hasLoanRepayment = true;
-        defiScore += 20;
-      }
-    }
+    // Determine risk level based on score
+    const score = Number(scoreDetails.score);
+    let riskLevel = 'Medium';
+    if (score < 600) riskLevel = 'High';
+    else if (score > 700) riskLevel = 'Low';
     
-    const riskScore = await this.calculateRiskScore(tokenBalances, defiPositions);
-    
-    const aggregateScore = 
-      (ageActivityScore * 0.25) +
-      (balanceScore * 0.25) +
-      (defiScore * 0.3) +
-      (riskScore * 0.2);
-    
-    const finalScore = 500 + Math.min(300, Math.round(aggregateScore * 3));
-    
-    const factors = [
-      {
-        category: 'Wallet Age & Activity',
-        score: Math.round(ageActivityScore),
-        description: txCount > 100 
-          ? 'Your wallet has a strong history of consistent activity on-chain.'
-          : txCount > 10
-            ? 'Your wallet has been active for a moderate period with some transactions.'
-            : 'Your wallet is relatively new or has limited activity.',
-        impact: ageActivityScore > 70 ? 'positive' as const : ageActivityScore > 30 ? 'neutral' as const : 'negative' as const
-      },
-      {
-        category: 'Token Balances',
-        score: Math.round(balanceScore),
-        description: totalBalance > 10000
-          ? 'Your wallet holds significant assets across multiple tokens.'
-          : totalBalance > 1000
-            ? 'Your wallet maintains moderate token balances.'
-            : 'Your wallet has limited token balances.',
-        impact: balanceScore > 70 ? 'positive' as const : balanceScore > 30 ? 'neutral' as const : 'negative' as const
-      },
-      {
-        category: 'DeFi Engagement',
-        score: Math.round(defiScore),
-        description: defiScore > 70
-          ? 'You have extensive engagement with multiple DeFi protocols.'
-          : defiScore > 30
-            ? 'You have moderate engagement with DeFi protocols.'
-            : 'You have limited or no engagement with DeFi protocols.',
-        impact: defiScore > 70 ? 'positive' as const : defiScore > 30 ? 'neutral' as const : 'negative' as const
-      },
-      {
-        category: 'Loan Repayment History',
-        score: hasLoanRepayment ? 80 : 0,
-        description: hasLoanRepayment
-          ? 'You have a history of responsible borrowing and repayment.'
-          : 'Limited loan repayment history available for analysis.',
-        impact: hasLoanRepayment ? 'positive' as const : 'neutral' as const
-      },
-      {
-        category: 'Risk Profile',
-        score: Math.round(riskScore),
-        description: riskScore > 70
-          ? 'Your activity shows a balanced approach to risk in DeFi markets.'
-          : riskScore > 30
-            ? 'Your risk profile shows some exposure to market volatility.'
-            : 'Your on-chain activity indicates high exposure to risk.',
-        impact: riskScore > 70 ? 'positive' as const : riskScore > 30 ? 'neutral' as const : 'negative' as const
-      }
-    ];
-    
-    const recommendations = this.generateRecommendations(
-      ageActivityScore,
-      balanceScore,
-      defiScore,
-      hasLoanRepayment,
-      riskScore
-    );
-    
-    return {
-      score: finalScore,
-      riskLevel: finalScore < 600 ? 'High' : finalScore < 700 ? 'Medium' : 'Low',
-      factors,
-      recommendations,
-      lastUpdated: new Date()
+    // Create credit score data object
+    const creditScoreData: CreditScoreData = {
+      score,
+      riskLevel,
+      factors: formattedFactors,
+      recommendations: recommendations,
+      lastUpdated: new Date(Number(scoreDetails.lastUpdated) * 1000) // Convert timestamp to Date
     };
-  }
-
-  private async calculateRiskScore(
-    tokenBalances: Record<string, number>,
-    defiPositions: any
-  ): Promise<number> {
-    let riskScore = 50;
     
-    const ethPrice = await walletService.getEthPrice();
-    
-    const totalValue = 
-      (tokenBalances.ETH * ethPrice) +
-      (tokenBalances.USDC || 0) +
-      (tokenBalances.USDT || 0) +
-      (tokenBalances.DAI || 0) +
-      (tokenBalances.WETH * ethPrice || 0);
-    
-    const stablecoinValue = 
-      (tokenBalances.USDC || 0) +
-      (tokenBalances.USDT || 0) +
-      (tokenBalances.DAI || 0);
-    
-    if (totalValue > 0) {
-      const stablecoinRatio = stablecoinValue / totalValue;
-      
-      if (stablecoinRatio > 0.3 && stablecoinRatio < 0.7) {
-        riskScore += 20;
-      }
-    }
-    
-    if (defiPositions.aave && defiPositions.aave.collateral > 0) {
-      if (defiPositions.aave.healthFactor > 2) {
-        riskScore += 15;
-      } else if (defiPositions.aave.healthFactor < 1.5) {
-        riskScore -= 15;
-      }
-    }
-    
-    if (defiPositions.compound) {
-      if (defiPositions.compound.shortfall > 0) {
-        riskScore -= 20;
-      } else if (defiPositions.compound.liquidity > 0) {
-        riskScore += 15;
-      }
-    }
-    
-    return Math.max(0, Math.min(100, riskScore));
-  }
-
-  private generateRecommendations(
-    ageActivityScore: number,
-    balanceScore: number,
-    defiScore: number,
-    hasLoanRepayment: boolean,
-    riskScore: number
-  ): string[] {
-    const recommendations: string[] = [];
-    
-    if (ageActivityScore < 50) {
-      recommendations.push('Increase your on-chain activity consistency to improve your score');
-    }
-    
-    if (balanceScore < 50) {
-      recommendations.push('Maintain higher token balances to strengthen your financial profile');
-    }
-    
-    if (defiScore < 40) {
-      recommendations.push('Increase your lending activity on major protocols to improve your score');
-    }
-    
-    if (!hasLoanRepayment) {
-      recommendations.push('Consider responsible borrowing and timely repayment to build positive credit history');
-    }
-    
-    if (riskScore < 50) {
-      recommendations.push('Diversify your assets across stablecoins and volatile assets for better risk balance');
-    }
-    
-    recommendations.push('Engage with governance voting to demonstrate protocol participation');
-    recommendations.push('Consider diversifying your DeFi activity across multiple chains');
-    
-    return recommendations;
-  }
-
-  public getCachedCreditScore(walletAddress: string): CreditScoreData | null {
-    return this.creditScoreCache.get(walletAddress) || null;
-  }
-
-  public clearCachedCreditScore(walletAddress: string): void {
-    this.creditScoreCache.delete(walletAddress);
+    return creditScoreData;
   }
 }
 
-export const creditScoreService = new CreditScoreService();
+const creditScoreService = new CreditScoreService();
 export default creditScoreService;

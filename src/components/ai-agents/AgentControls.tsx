@@ -51,6 +51,17 @@ const AgentControls: React.FC<AgentControlsProps> = ({ agentType, agentName }) =
     };
     
     checkNetworkCompatibility();
+    
+    // Listen for chain changes
+    if (window.ethereum) {
+      window.ethereum.on('chainChanged', checkNetworkCompatibility);
+    }
+    
+    return () => {
+      if (window.ethereum) {
+        window.ethereum.removeListener('chainChanged', checkNetworkCompatibility);
+      }
+    };
   }, [agentType, walletAddress]); 
   
   // Get agent settings when wallet address or agent type changes
@@ -119,6 +130,15 @@ const AgentControls: React.FC<AgentControlsProps> = ({ agentType, agentName }) =
       return;
     }
     
+    // Check for network support
+    const isNetworkSupported = await walletService.isNetworkSupported();
+    if (!isNetworkSupported) {
+      toast.error('Unsupported network', {
+        description: 'Please switch to Ethereum Mainnet, Goerli, or Sepolia testnet'
+      });
+      return;
+    }
+    
     setIsExecuting(true);
     
     try {
@@ -152,7 +172,7 @@ const AgentControls: React.FC<AgentControlsProps> = ({ agentType, agentName }) =
           className="text-white/50 border-white/10"
           disabled
         >
-          <div className="w-4 h-4 border-t-2 border-current rounded-full animate-spin mr-2"></div>
+          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
           <span>Loading...</span>
         </Button>
       </div>

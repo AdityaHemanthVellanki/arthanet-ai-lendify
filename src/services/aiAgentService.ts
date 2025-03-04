@@ -1,21 +1,35 @@
 
-import { toast } from 'sonner';
 import { ethers } from 'ethers';
-import walletService, { WalletInfo } from './walletService';
+import { toast } from 'sonner';
+import walletService from './walletService';
 
+// Import ABIs
+import LendingProtocolABI from '../abis/LendingProtocolABI.json';
+import YieldFarmerABI from '../abis/YieldFarmerABI.json';
+import PortfolioManagerABI from '../abis/PortfolioManagerABI.json';
+import RiskAnalyzerABI from '../abis/RiskAnalyzerABI.json';
+
+// Contract addresses - would typically come from environment variables
+const CONTRACT_ADDRESSES = {
+  'auto-lender': '0x123456789abcdef123456789abcdef123456789a', // Replace with actual contract address
+  'yield-farmer': '0x987654321abcdef987654321abcdef987654321', // Replace with actual contract address
+  'risk-analyzer': '0xabcdef123456789abcdef123456789abcdef1234', // Replace with actual contract address
+  'portfolio-manager': '0x456789abcdef123456789abcdef123456789abc', // Replace with actual contract address
+};
+
+// Define types
 export type AgentType = 'auto-lender' | 'yield-farmer' | 'risk-analyzer' | 'portfolio-manager';
 
 export interface AgentSettings {
   isActive: boolean;
   riskTolerance: 'low' | 'medium' | 'high';
-  maxGasFee: number; // in Gwei
-  autoRebalance: boolean;
   platforms: string[];
+  autoRebalance: boolean;
+  maxGasFee: number;
 }
 
 export interface AgentAction {
   id: string;
-  agentType: AgentType;
   timestamp: number;
   action: string;
   details: string;
@@ -23,891 +37,669 @@ export interface AgentAction {
   txHash?: string;
 }
 
-export interface DefiPosition {
-  platform: string;
-  assetName: string;
-  assetAddress: string;
-  balance: number;
-  valueUSD: number;
-  apy: number;
-  risk: number; // 1-10 scale
-}
-
 export interface AgentAnalytics {
   totalValueLocked: number;
+  riskScore: number;
   dailyYield: number;
   weeklyYield: number;
   monthlyYield: number;
-  riskScore: number; // 1-10 scale
-  gasSpent: number;
-  lastRebalance: number; // timestamp
+  lastRebalance?: Date;
 }
 
-// ABI for the agent contracts - These would be the actual ABIs in a real application
-const agentContractABI = [
-  {
-    "inputs": [{"internalType": "uint256", "name": "riskLevel", "type": "uint256"}],
-    "name": "executeStrategy",
-    "outputs": [{"internalType": "bool", "name": "success", "type": "bool"}],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [],
-    "name": "getPositions",
-    "outputs": [{"internalType": "string", "name": "positionsJson", "type": "string"}],
-    "stateMutability": "view",
-    "type": "function"
-  }
-];
+export interface DefiPosition {
+  assetAddress: string;
+  assetName: string;
+  platform: string;
+  balance: number;
+  valueUSD: number;
+  apy: number;
+  risk: number;
+}
 
-// Aave lending pool interface ABI
-const aaveLendingPoolABI = [
-  {
-    "inputs": [{"internalType": "address", "name": "user", "type": "address"}],
-    "name": "getUserAccountData",
-    "outputs": [
-      {"internalType": "uint256", "name": "totalCollateralETH", "type": "uint256"},
-      {"internalType": "uint256", "name": "totalDebtETH", "type": "uint256"},
-      {"internalType": "uint256", "name": "availableBorrowsETH", "type": "uint256"},
-      {"internalType": "uint256", "name": "currentLiquidationThreshold", "type": "uint256"},
-      {"internalType": "uint256", "name": "ltv", "type": "uint256"},
-      {"internalType": "uint256", "name": "healthFactor", "type": "uint256"}
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  }
-];
-
-// Compound cToken interface ABI
-const compoundCTokenABI = [
-  {
-    "inputs": [{"internalType": "address", "name": "account", "type": "address"}],
-    "name": "balanceOf",
-    "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [],
-    "name": "exchangeRateStored",
-    "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
-    "stateMutability": "view",
-    "type": "function"
-  }
-];
-
-// Smart contract addresses for each agent type - Updated to use real testnet addresses
-const agentContractAddresses: Record<AgentType, string> = {
-  // Using Goerli/Sepolia testnet addresses for testing
-  'auto-lender': '0x7Fc66500c84A76Ad7e9c93437bFc5Ac33E2DDaE9', // Aave on Goerli
-  'yield-farmer': '0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984', // Uniswap on Goerli
-  'risk-analyzer': '0x5E5c5F36bD7Cf49C72d2C011CCB1E433fe0d5876', // Mock contract address
-  'portfolio-manager': '0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D' // Uniswap Router on Goerli
-};
-
-// Protocol addresses for fetching real data - Updated to match testnet addresses
-const protocolAddresses = {
-  // Updated to use Goerli/Sepolia testnet addresses
-  aaveLendingPool: '0x368EedF3f56ad10b9bC57eed4Dac65B26Bb667f6', // Aave on Goerli
-  compoundCETH: '0x64078a6189Bf45f80091c6Ff2fCEe1B15Ac8dbde',   // cETH on Goerli
-  compoundCUSDC: '0x73506770799Eb04befb5AaE4734e58C2C624F493'   // cUSDC on Goerli
-};
-
-// Risk levels corresponding to settings
-const riskLevelMap: Record<'low' | 'medium' | 'high', number> = {
-  'low': 1,
-  'medium': 5,
-  'high': 10
-};
-
-// Default settings for each agent
-const defaultSettings: Record<AgentType, AgentSettings> = {
-  'auto-lender': {
-    isActive: false,
-    riskTolerance: 'medium',
-    maxGasFee: 50,
-    autoRebalance: true,
-    platforms: ['Aave', 'Compound']
-  },
-  'yield-farmer': {
-    isActive: false,
-    riskTolerance: 'medium',
-    maxGasFee: 50,
-    autoRebalance: true,
-    platforms: ['Uniswap', 'Curve']
-  },
-  'risk-analyzer': {
-    isActive: false,
-    riskTolerance: 'low',
-    maxGasFee: 30,
-    autoRebalance: false,
-    platforms: ['All']
-  },
-  'portfolio-manager': {
-    isActive: false,
-    riskTolerance: 'medium',
-    maxGasFee: 40,
-    autoRebalance: true,
-    platforms: ['All']
-  }
-};
+type AgentCallback = (address: string, agentType?: AgentType) => void;
 
 class AIAgentService {
   private settings: Record<string, Record<AgentType, AgentSettings>> = {};
-  private actions: Record<string, AgentAction[]> = {};
-  private positions: Record<string, DefiPosition[]> = {};
+  private actions: Record<string, Record<AgentType, AgentAction[]>> = {};
   private analytics: Record<string, Record<AgentType, AgentAnalytics>> = {};
-  private listeners: ((address: string, agentType: AgentType) => void)[] = [];
-  private provider: ethers.Provider | null = null;
-  private isRefreshing: boolean = false;
-  private positionScanTimeouts: Record<string, NodeJS.Timeout> = {};
+  private positions: Record<string, DefiPosition[]> = {};
+  private subscribers: AgentCallback[] = [];
+  
+  // Contract ABIs mapping
+  private agentABIs = {
+    'auto-lender': LendingProtocolABI,
+    'yield-farmer': YieldFarmerABI, 
+    'risk-analyzer': RiskAnalyzerABI,
+    'portfolio-manager': PortfolioManagerABI
+  };
 
-  constructor() {
-    this.initProvider();
-  }
-
-  private initProvider() {
-    // Initialize ethers provider when available
-    if (typeof window !== 'undefined' && window.ethereum) {
-      this.provider = new ethers.BrowserProvider(window.ethereum);
+  // Initialize default settings for a new wallet
+  private initializeDefaultSettings(walletAddress: string, agentType: AgentType) {
+    if (!this.settings[walletAddress]) {
+      this.settings[walletAddress] = {} as Record<AgentType, AgentSettings>;
+    }
+    
+    if (!this.settings[walletAddress][agentType]) {
+      this.settings[walletAddress][agentType] = {
+        isActive: false,
+        riskTolerance: 'medium',
+        platforms: this.getDefaultPlatforms(agentType),
+        autoRebalance: true,
+        maxGasFee: 50,
+      };
     }
   }
-
-  // Get agent settings for a specific wallet address
-  public getAgentSettings(address: string, agentType: AgentType): AgentSettings {
-    if (!this.settings[address]) {
-      this.settings[address] = JSON.parse(JSON.stringify(defaultSettings));
+  
+  // Initialize default actions for a new wallet
+  private initializeDefaultActions(walletAddress: string, agentType: AgentType) {
+    if (!this.actions[walletAddress]) {
+      this.actions[walletAddress] = {} as Record<AgentType, AgentAction[]>;
     }
-    return this.settings[address][agentType];
+    
+    if (!this.actions[walletAddress][agentType]) {
+      this.actions[walletAddress][agentType] = [];
+    }
   }
-
+  
+  // Initialize default analytics for a new wallet
+  private initializeDefaultAnalytics(walletAddress: string, agentType: AgentType) {
+    if (!this.analytics[walletAddress]) {
+      this.analytics[walletAddress] = {} as Record<AgentType, AgentAnalytics>;
+    }
+    
+    if (!this.analytics[walletAddress][agentType]) {
+      this.analytics[walletAddress][agentType] = {
+        totalValueLocked: 0,
+        riskScore: 0,
+        dailyYield: 0,
+        weeklyYield: 0,
+        monthlyYield: 0,
+      };
+    }
+  }
+  
+  // Get default platforms for each agent type
+  private getDefaultPlatforms(agentType: AgentType): string[] {
+    switch (agentType) {
+      case 'auto-lender':
+        return ['Aave', 'Compound', 'Morpho'];
+      case 'yield-farmer':
+        return ['Uniswap', 'Curve', 'Balancer'];
+      case 'risk-analyzer':
+        return ['Oasis', 'MakerDAO', 'Liquity'];
+      case 'portfolio-manager':
+        return ['All Protocols'];
+      default:
+        return [];
+    }
+  }
+  
+  // Get agent settings, initializing defaults if they don't exist
+  getAgentSettings(walletAddress: string, agentType: AgentType): AgentSettings {
+    this.initializeDefaultSettings(walletAddress, agentType);
+    return this.settings[walletAddress][agentType];
+  }
+  
   // Update agent settings
-  public updateAgentSettings(address: string, agentType: AgentType, newSettings: Partial<AgentSettings>): void {
-    if (!this.settings[address]) {
-      this.settings[address] = JSON.parse(JSON.stringify(defaultSettings));
-    }
+  updateAgentSettings(walletAddress: string, agentType: AgentType, settings: AgentSettings) {
+    this.initializeDefaultSettings(walletAddress, agentType);
+    this.settings[walletAddress][agentType] = settings;
     
-    this.settings[address][agentType] = {
-      ...this.settings[address][agentType],
-      ...newSettings
-    };
-    
-    // Notify UI about the change
-    this.notifyListeners(address, agentType);
-    
-    if (newSettings.isActive !== undefined) {
-      const statusMessage = newSettings.isActive 
-        ? `${this.getAgentName(agentType)} has been activated` 
-        : `${this.getAgentName(agentType)} has been deactivated`;
-      
-      toast[newSettings.isActive ? 'success' : 'info'](statusMessage);
-      
-      if (newSettings.isActive) {
-        // Record agent activation as an action
-        this.recordAgentAction(address, agentType, 'Agent activated', 'Agent has been activated with current settings', 'completed');
-      }
-    }
+    // Persist settings to blockchain
+    this.updateSettingsOnChain(walletAddress, agentType, settings)
+      .then(() => {
+        this.notifySubscribers(walletAddress, agentType);
+      })
+      .catch(error => {
+        console.error("Error updating settings on-chain:", error);
+        toast.error("Failed to update settings on blockchain");
+      });
   }
-
+  
   // Toggle agent active status
-  public toggleAgentActive(address: string, agentType: AgentType): void {
-    const currentSettings = this.getAgentSettings(address, agentType);
-    this.updateAgentSettings(address, agentType, {
-      isActive: !currentSettings.isActive
-    });
+  toggleAgentActive(walletAddress: string, agentType: AgentType) {
+    this.initializeDefaultSettings(walletAddress, agentType);
+    const currentSettings = this.settings[walletAddress][agentType];
+    currentSettings.isActive = !currentSettings.isActive;
+    
+    // Persist active state to blockchain
+    this.updateSettingsOnChain(walletAddress, agentType, currentSettings)
+      .then(() => {
+        this.notifySubscribers(walletAddress, agentType);
+        toast.success(
+          currentSettings.isActive 
+            ? `${this.getAgentName(agentType)} activated` 
+            : `${this.getAgentName(agentType)} deactivated`
+        );
+      })
+      .catch(error => {
+        // Revert the change if the blockchain update fails
+        currentSettings.isActive = !currentSettings.isActive;
+        console.error("Error toggling agent active state:", error);
+        toast.error("Failed to update agent status on blockchain");
+      });
   }
-
+  
   // Get agent name from type
   private getAgentName(agentType: AgentType): string {
-    switch(agentType) {
-      case 'auto-lender': return 'AI Auto-Lender';
-      case 'yield-farmer': return 'Smart Yield Farmer';
-      case 'risk-analyzer': return 'Risk Analyzer';
-      case 'portfolio-manager': return 'Portfolio Manager';
-      default: return 'AI Agent';
+    switch (agentType) {
+      case 'auto-lender':
+        return 'AI Auto-Lender';
+      case 'yield-farmer':
+        return 'Smart Yield Farmer';
+      case 'risk-analyzer':
+        return 'Risk Analyzer';
+      case 'portfolio-manager':
+        return 'Portfolio Manager';
+      default:
+        return 'AI Agent';
     }
   }
-
-  // Record an action performed by an agent
-  public recordAgentAction(
-    address: string, 
+  
+  // Get agent actions, initializing defaults if they don't exist
+  getAgentActions(walletAddress: string, agentType: AgentType): AgentAction[] {
+    this.initializeDefaultActions(walletAddress, agentType);
+    return this.actions[walletAddress][agentType];
+  }
+  
+  // Add a new agent action
+  private async addAgentAction(
+    walletAddress: string, 
     agentType: AgentType, 
     action: string, 
-    details: string, 
-    status: 'pending' | 'completed' | 'failed',
-    txHash?: string
-  ): void {
-    if (!this.actions[address]) {
-      this.actions[address] = [];
-    }
+    details: string,
+    txPromise?: Promise<ethers.TransactionResponse>
+  ): Promise<void> {
+    this.initializeDefaultActions(walletAddress, agentType);
     
+    // Create new action with pending status
     const newAction: AgentAction = {
-      id: Math.random().toString(36).substring(2, 15),
-      agentType,
+      id: `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
       timestamp: Date.now(),
       action,
       details,
-      status,
-      txHash
+      status: 'pending'
     };
     
-    this.actions[address] = [newAction, ...this.actions[address]];
+    // Add to actions list
+    this.actions[walletAddress][agentType].unshift(newAction);
+    this.notifySubscribers(walletAddress, agentType);
     
-    // Notify UI about the change
-    this.notifyListeners(address, agentType);
+    // If there's a transaction, wait for it to complete
+    if (txPromise) {
+      try {
+        const tx = await txPromise;
+        newAction.txHash = tx.hash;
+        this.notifySubscribers(walletAddress, agentType);
+        
+        // Wait for transaction confirmation
+        await tx.wait();
+        
+        // Update action status
+        newAction.status = 'completed';
+        this.notifySubscribers(walletAddress, agentType);
+        
+        // Update positions and analytics after successful transaction
+        await this.fetchDefiPositions(walletAddress);
+        await this.fetchAgentAnalytics(walletAddress, agentType);
+        
+        return;
+      } catch (error) {
+        console.error(`Error in ${action} transaction:`, error);
+        newAction.status = 'failed';
+        newAction.details += ` - Error: ${error instanceof Error ? error.message : 'Unknown error'}`;
+        this.notifySubscribers(walletAddress, agentType);
+        throw error;
+      }
+    } else {
+      // If no transaction, mark as completed immediately
+      newAction.status = 'completed';
+      this.notifySubscribers(walletAddress, agentType);
+    }
   }
-
-  // Get actions for a specific wallet address and agent type
-  public getAgentActions(address: string, agentType?: AgentType): AgentAction[] {
-    if (!this.actions[address]) {
+  
+  // Run an agent action
+  async runAgentAction(walletAddress: string, agentType: AgentType): Promise<void> {
+    // Check if the agent is active
+    const settings = this.getAgentSettings(walletAddress, agentType);
+    if (!settings.isActive) {
+      toast.error(`${this.getAgentName(agentType)} is not active`, {
+        description: 'Please activate the agent in settings first'
+      });
+      return;
+    }
+    
+    // Check if wallet is connected to a supported network
+    const isNetworkSupported = await walletService.isNetworkSupported();
+    if (!isNetworkSupported) {
+      toast.error('Unsupported network', {
+        description: 'Please connect to Ethereum Mainnet, Goerli, or Sepolia testnet'
+      });
+      return;
+    }
+    
+    // Get current gas price
+    const gasPrice = await walletService.getGasPrice();
+    const maxGasPrice = BigInt(settings.maxGasFee * 1000000000); // Convert gwei to wei
+    
+    if (gasPrice > maxGasPrice) {
+      toast.error('Gas price too high', {
+        description: `Current gas price exceeds your maximum setting of ${settings.maxGasFee} Gwei`
+      });
+      return;
+    }
+    
+    // Get the appropriate contract
+    const contractAddress = CONTRACT_ADDRESSES[agentType];
+    const abi = this.agentABIs[agentType];
+    const contract = await walletService.getContractWithSigner(contractAddress, abi);
+    
+    if (!contract) {
+      toast.error('Failed to connect to contract', {
+        description: 'Contract interaction not available at the moment'
+      });
+      return;
+    }
+    
+    try {
+      let txPromise;
+      
+      // Different action based on agent type
+      switch (agentType) {
+        case 'auto-lender':
+          // Find best lending rate
+          txPromise = contract.depositToPool(
+            "0xBestPoolAddress", // In a real app, this would be determined by the agent
+            ethers.parseEther("0.1"), // Example amount
+            { gasPrice }
+          );
+          
+          await this.addAgentAction(
+            walletAddress,
+            agentType,
+            'Optimize Lending',
+            'Depositing funds to optimal lending pool',
+            txPromise
+          );
+          break;
+          
+        case 'yield-farmer':
+          // Optimize yield farming
+          txPromise = contract.stakeInFarm(
+            "0xBestFarmAddress", // In a real app, this would be determined by the agent
+            ethers.parseEther("0.1"), // Example amount
+            { gasPrice }
+          );
+          
+          await this.addAgentAction(
+            walletAddress,
+            agentType,
+            'Optimize Yield Farming',
+            'Staking funds in the most profitable farm',
+            txPromise
+          );
+          break;
+          
+        case 'risk-analyzer':
+          // Run risk analysis
+          txPromise = contract.runRiskAnalysis(
+            walletAddress,
+            { gasPrice }
+          );
+          
+          await this.addAgentAction(
+            walletAddress,
+            agentType,
+            'Risk Analysis',
+            'Analyzing portfolio risk and making recommendations',
+            txPromise
+          );
+          break;
+          
+        case 'portfolio-manager':
+          // Rebalance portfolio
+          txPromise = contract.rebalancePortfolio(
+            walletAddress,
+            { gasPrice }
+          );
+          
+          await this.addAgentAction(
+            walletAddress,
+            agentType,
+            'Portfolio Rebalance',
+            'Optimizing asset allocation based on market conditions',
+            txPromise
+          );
+          break;
+          
+        default:
+          throw new Error(`Unknown agent type: ${agentType}`);
+      }
+      
+      toast.success(`${this.getAgentName(agentType)} action completed`, {
+        description: 'Transaction has been submitted to the blockchain'
+      });
+    } catch (error) {
+      console.error(`Error running ${agentType} action:`, error);
+      toast.error(`Error running ${this.getAgentName(agentType)}`, {
+        description: error instanceof Error ? error.message : 'Unknown error occurred'
+      });
+      throw error;
+    }
+  }
+  
+  // Get agent analytics, initializing defaults if they don't exist
+  getAgentAnalytics(walletAddress: string, agentType: AgentType): AgentAnalytics {
+    this.initializeDefaultAnalytics(walletAddress, agentType);
+    
+    // Fetch real data from the blockchain if we haven't already
+    if (this.analytics[walletAddress][agentType].totalValueLocked === 0) {
+      this.fetchAgentAnalytics(walletAddress, agentType).catch(error => {
+        console.error(`Error fetching ${agentType} analytics:`, error);
+      });
+    }
+    
+    return this.analytics[walletAddress][agentType];
+  }
+  
+  // Get DeFi positions for a wallet address
+  getDefiPositions(walletAddress: string): DefiPosition[] {
+    return this.positions[walletAddress] || [];
+  }
+  
+  // Fetch DeFi positions from the blockchain
+  async fetchDefiPositions(walletAddress: string): Promise<DefiPosition[]> {
+    if (!walletAddress) {
       return [];
     }
     
-    if (agentType) {
-      return this.actions[address].filter(action => action.agentType === agentType);
-    }
-    
-    return this.actions[address];
-  }
-
-  // Force refresh all positions
-  public async forceRefreshPositions(address: string): Promise<void> {
-    if (this.isRefreshing) {
-      toast.info("Already scanning blockchain for positions");
-      return;
-    }
-
-    // Clear any existing timeout for this address
-    if (this.positionScanTimeouts[address]) {
-      clearTimeout(this.positionScanTimeouts[address]);
-      delete this.positionScanTimeouts[address];
-    }
-
-    this.isRefreshing = true;
-    toast.info("Scanning blockchain for your DeFi positions...");
-
     try {
-      // Make sure we have a valid provider
-      if (!this.provider) {
-        this.initProvider();
-        if (!this.provider) {
-          throw new Error('Ethereum provider not available');
-        }
-      }
-
-      // Check if we're connected to a valid network
-      const network = await this.provider.getNetwork();
-      console.log("Connected to network:", network.name, "Chain ID:", network.chainId);
-
-      // Check if wallet is valid
-      const walletInfo = walletService.getCurrentWallet();
-      if (!walletInfo) {
-        throw new Error('Wallet not connected');
-      }
-      console.log("Scanning positions for wallet:", walletInfo.address);
-
-      // Fetch positions with real on-chain data
-      const positions = await this.fetchDefiPositions(address);
+      console.log("Fetching DeFi positions for:", walletAddress);
       
-      if (positions.length === 0) {
-        toast.info("No DeFi positions found on connected networks", {
-          description: "Try connecting to a different network or check your wallet addresses"
-        });
-      } else {
-        toast.success(`Found ${positions.length} DeFi positions`, {
-          description: `Positions found on ${[...new Set(positions.map(p => p.platform))].join(', ')}`
-        });
-      }
-    } catch (error) {
-      console.error("Error refreshing positions:", error);
-      toast.error("Failed to scan blockchain", {
-        description: error instanceof Error ? error.message : "Please try again or check wallet connection"
-      });
-    } finally {
-      this.isRefreshing = false;
-    }
-  }
-
-  // Get DeFi positions for a specific wallet address
-  public getDefiPositions(address: string): DefiPosition[] {
-    // Schedule a refresh if we don't have positions yet
-    if (!this.positions[address] || this.positions[address].length === 0) {
-      // Only schedule if not already scheduled
-      if (!this.positionScanTimeouts[address] && !this.isRefreshing) {
-        this.positionScanTimeouts[address] = setTimeout(() => {
-          this.fetchDefiPositions(address).then(positions => {
-            delete this.positionScanTimeouts[address];
-            // Notify listeners of the update
-            this.notifyListeners(address, 'portfolio-manager');
-          });
-        }, 500);
-      }
-    }
-    return this.positions[address] || [];
-  }
-
-  // Fetch real DeFi positions from various protocols
-  public async fetchDefiPositions(address: string): Promise<DefiPosition[]> {
-    if (!this.provider) {
-      this.initProvider();
-      if (!this.provider) {
-        throw new Error('Ethereum provider not available');
-      }
-    }
-
-    const results: DefiPosition[] = [];
-    
-    try {
-      // Get network information
-      const network = await this.provider.getNetwork();
-      const chainId = Number(network.chainId);
-      console.log(`Fetching positions on network: ${network.name}, Chain ID: ${chainId}`);
-      
-      // Get ETH price for USD conversion
-      const ethPrice = await walletService.getEthPrice();
-      console.log(`Current ETH price: $${ethPrice}`);
-      
-      // Try to get Aave positions
-      try {
-        console.log("Fetching Aave positions...");
-        const aavePositions = await this.fetchAavePositions(address, ethPrice);
-        if (aavePositions.length > 0) {
-          console.log(`Found ${aavePositions.length} Aave positions`);
-          results.push(...aavePositions);
-        }
-      } catch (error) {
-        console.error("Error fetching Aave positions:", error);
-      }
-      
-      // Try to get Compound positions
-      try {
-        console.log("Fetching Compound positions...");
-        const compoundPositions = await this.fetchCompoundPositions(address, ethPrice);
-        if (compoundPositions.length > 0) {
-          console.log(`Found ${compoundPositions.length} Compound positions`);
-          results.push(...compoundPositions);
-        }
-      } catch (error) {
-        console.error("Error fetching Compound positions:", error);
-      }
-      
-      // Try to get Uniswap positions
-      try {
-        console.log("Fetching Uniswap positions...");
-        const uniswapPositions = await this.fetchUniswapPositions(address, ethPrice);
-        if (uniswapPositions.length > 0) {
-          console.log(`Found ${uniswapPositions.length} Uniswap positions`);
-          results.push(...uniswapPositions);
-        }
-      } catch (error) {
-        console.error("Error fetching Uniswap positions:", error);
-      }
-      
-      console.log(`Total positions found: ${results.length}`);
-    } catch (error) {
-      console.error('Error fetching DeFi positions:', error);
-    }
-    
-    // Cache the results
-    this.positions[address] = results;
-    
-    return results;
-  }
-
-  // Fetch positions from Aave protocol with real on-chain data
-  private async fetchAavePositions(address: string, ethPrice: number): Promise<DefiPosition[]> {
-    try {
-      console.log("Checking Aave lending pool at:", protocolAddresses.aaveLendingPool);
-      // First check if the contract exists on this network
-      const code = await this.provider!.getCode(protocolAddresses.aaveLendingPool);
-      if (code === '0x' || code === '0x0') {
-        console.log("Aave lending pool not deployed on this network");
+      // Check if wallet is connected to a supported network
+      const isNetworkSupported = await walletService.isNetworkSupported();
+      if (!isNetworkSupported) {
+        console.warn('Unsupported network for fetching DeFi positions');
         return [];
       }
       
-      // On mainnet or testnet, use the actual Aave contract
-      const aaveContract = new ethers.Contract(
-        protocolAddresses.aaveLendingPool,
-        aaveLendingPoolABI,
-        this.provider
-      );
+      // Initialize array to store positions
+      const positions: DefiPosition[] = [];
       
-      // Call getUserAccountData to get user's collateral and debt
-      console.log("Calling getUserAccountData for address:", address);
-      const accountData = await aaveContract.getUserAccountData(address);
-      console.log("Aave account data:", accountData);
-      
-      // If user has collateral, create a position
-      if (accountData && Number(ethers.formatEther(accountData.totalCollateralETH)) > 0) {
-        const collateralEth = Number(ethers.formatEther(accountData.totalCollateralETH));
-        const valueUSD = collateralEth * ethPrice;
+      // For each agent contract, fetch positions
+      for (const agentType of Object.keys(CONTRACT_ADDRESSES) as AgentType[]) {
+        const contractAddress = CONTRACT_ADDRESSES[agentType];
+        const abi = this.agentABIs[agentType];
+        const contract = await walletService.getContract(contractAddress, abi);
         
-        // Calculate risk based on health factor
-        let risk = 5;
-        let healthFactor = 0;
+        if (!contract) continue;
         
         try {
-          healthFactor = Number(ethers.formatEther(accountData.healthFactor));
-          
-          if (healthFactor > 2) risk = 2;
-          else if (healthFactor > 1.5) risk = 5;
-          else risk = 8;
-        } catch (e) {
-          console.error("Error parsing health factor:", e);
-        }
-        
-        console.log(`Found Aave position: ${collateralEth} ETH ($${valueUSD}), risk: ${risk}`);
-        
-        return [{
-          platform: 'Aave',
-          assetName: 'Multiple Assets',
-          assetAddress: protocolAddresses.aaveLendingPool,
-          balance: collateralEth,
-          valueUSD: valueUSD,
-          apy: 4.5, // This would come from Aave API in a real app
-          risk: risk
-        }];
-      }
-    } catch (error) {
-      console.error('Error fetching Aave positions:', error);
-      
-      // Check if it's a network error and log it
-      if (error instanceof Error) {
-        if (error.message.includes("call revert exception")) {
-          console.log("Contract call reverted - likely Aave not supported on this network");
-        }
-      }
-    }
-    
-    return [];
-  }
-
-  // Fetch positions from Compound protocol with real on-chain data
-  private async fetchCompoundPositions(address: string, ethPrice: number): Promise<DefiPosition[]> {
-    const positions: DefiPosition[] = [];
-    
-    try {
-      // Check if the contract exists on this network
-      const code = await this.provider!.getCode(protocolAddresses.compoundCETH);
-      if (code === '0x' || code === '0x0') {
-        console.log("Compound cETH not deployed on this network");
-        return [];
-      }
-      
-      // Check for cETH balance
-      console.log("Checking Compound cETH at:", protocolAddresses.compoundCETH);
-      const cEthContract = new ethers.Contract(
-        protocolAddresses.compoundCETH,
-        compoundCTokenABI,
-        this.provider
-      );
-      
-      console.log("Calling balanceOf for address:", address);
-      const cEthBalance = await cEthContract.balanceOf(address);
-      console.log("cETH balance:", cEthBalance.toString());
-      
-      if (Number(cEthBalance) > 0) {
-        console.log("Calling exchangeRateStored");
-        const exchangeRate = await cEthContract.exchangeRateStored();
-        console.log("Exchange rate:", exchangeRate.toString());
-        
-        // Calculate actual ETH balance
-        const ethBalance = (Number(cEthBalance) * Number(exchangeRate)) / 1e28; // Compound uses 1e28 scale
-        const valueUSD = ethBalance * ethPrice;
-        
-        console.log(`Found Compound ETH position: ${ethBalance} ETH ($${valueUSD})`);
-        
-        positions.push({
-          platform: 'Compound',
-          assetName: 'ETH',
-          assetAddress: protocolAddresses.compoundCETH,
-          balance: ethBalance,
-          valueUSD: valueUSD,
-          apy: 3.2, // This would come from Compound API in a real app
-          risk: 2
-        });
-      }
-      
-      // Check for cUSDC balance
-      const codeUsdc = await this.provider!.getCode(protocolAddresses.compoundCUSDC);
-      if (codeUsdc === '0x' || codeUsdc === '0x0') {
-        console.log("Compound cUSDC not deployed on this network");
-        return positions;
-      }
-      
-      console.log("Checking Compound cUSDC at:", protocolAddresses.compoundCUSDC);
-      const cUsdcContract = new ethers.Contract(
-        protocolAddresses.compoundCUSDC,
-        compoundCTokenABI,
-        this.provider
-      );
-      
-      console.log("Calling balanceOf for address:", address);
-      const cUsdcBalance = await cUsdcContract.balanceOf(address);
-      console.log("cUSDC balance:", cUsdcBalance.toString());
-      
-      if (Number(cUsdcBalance) > 0) {
-        console.log("Calling exchangeRateStored for USDC");
-        const usdcExchangeRate = await cUsdcContract.exchangeRateStored();
-        console.log("USDC Exchange rate:", usdcExchangeRate.toString());
-        
-        // Calculate actual USDC balance, accounting for 6 decimals in USDC
-        const usdcBalance = (Number(cUsdcBalance) * Number(usdcExchangeRate)) / 1e16; // Adjusted for USDC decimals
-        
-        console.log(`Found Compound USDC position: ${usdcBalance} USDC`);
-        
-        positions.push({
-          platform: 'Compound',
-          assetName: 'USDC',
-          assetAddress: protocolAddresses.compoundCUSDC,
-          balance: usdcBalance,
-          valueUSD: usdcBalance,
-          apy: 5.1, // This would come from Compound API in a real app
-          risk: 1
-        });
-      }
-    } catch (error) {
-      console.error('Error fetching Compound positions:', error);
-      
-      // Check if it's a network error and log it
-      if (error instanceof Error) {
-        if (error.message.includes("call revert exception")) {
-          console.log("Contract call reverted - likely Compound not supported on this network");
-        }
-      }
-    }
-    
-    return positions;
-  }
-
-  // Fetch positions from Uniswap with real on-chain data
-  private async fetchUniswapPositions(address: string, ethPrice: number): Promise<DefiPosition[]> {
-    try {
-      console.log("Checking for Uniswap positions for address:", address);
-      
-      // Check if user has ETH balance (needed for interactions)
-      const ethBalance = await this.provider?.getBalance(address);
-      console.log("ETH balance:", ethBalance ? ethers.formatEther(ethBalance) : "0");
-      
-      // In a real implementation, we would query the Uniswap position manager contract
-      // or the Graph protocol for positions
-      
-      // For now, only report positions if user has significant ETH (could be used for LP)
-      if (ethBalance && Number(ethers.formatEther(ethBalance)) > 0.1) {
-        // Simple check - in a real app, you'd query Uniswap position manager contract
-        // For demonstration, return a position if user has ETH
-        const lpValue = Number(ethers.formatEther(ethBalance)) * 0.3; // Assume 30% is in LP
-        const valueUSD = lpValue * ethPrice;
-        
-        if (valueUSD > 10) { // Only show if value is significant
-          console.log(`Creating placeholder Uniswap position: Value $${valueUSD}`);
-          
-          return [{
-            platform: 'Uniswap',
-            assetName: 'ETH-USDC LP',
-            assetAddress: '0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640', // Uniswap V3 ETH-USDC pool
-            balance: lpValue,
-            valueUSD: valueUSD,
-            apy: 12.4,
-            risk: 6
-          }];
-        }
-      }
-    } catch (error) {
-      console.error('Error fetching Uniswap positions:', error);
-    }
-    
-    return [];
-  }
-
-  // Get analytics for a specific wallet address and agent type
-  public getAgentAnalytics(address: string, agentType: AgentType): AgentAnalytics | null {
-    if (!this.analytics[address]) {
-      // Generate analytics based on positions
-      this.generateAnalytics(address);
-    }
-    
-    return this.analytics[address]?.[agentType] || null;
-  }
-
-  // Generate analytics from positions data
-  private generateAnalytics(address: string): void {
-    const positions = this.positions[address] || [];
-    if (positions.length === 0) return;
-    
-    const totalValue = positions.reduce((sum, pos) => sum + pos.valueUSD, 0);
-    const avgRisk = positions.reduce((sum, pos) => sum + pos.risk * (pos.valueUSD / totalValue), 0);
-    const avgApy = positions.reduce((sum, pos) => sum + pos.apy * (pos.valueUSD / totalValue), 0);
-    
-    const baseAnalytics: AgentAnalytics = {
-      totalValueLocked: totalValue,
-      dailyYield: (totalValue * avgApy / 100) / 365,
-      weeklyYield: (totalValue * avgApy / 100) / 52,
-      monthlyYield: (totalValue * avgApy / 100) / 12,
-      riskScore: Math.round(avgRisk),
-      gasSpent: 0.05, // This would track actual gas spent in a real app
-      lastRebalance: Date.now() - 86400000 // 1 day ago
-    };
-    
-    this.analytics[address] = {
-      'auto-lender': {
-        ...baseAnalytics,
-        // Auto-lender focuses on lending protocols
-        totalValueLocked: positions.filter(p => p.platform === 'Aave' || p.platform === 'Compound')
-          .reduce((sum, pos) => sum + pos.valueUSD, 0)
-      },
-      'yield-farmer': {
-        ...baseAnalytics,
-        // Yield farmer focuses on LP positions
-        totalValueLocked: positions.filter(p => p.platform === 'Uniswap' || p.platform === 'Curve')
-          .reduce((sum, pos) => sum + pos.valueUSD, 0)
-      },
-      'risk-analyzer': {
-        ...baseAnalytics,
-        // Risk analyzer tracks all positions
-        riskScore: Math.min(Math.round(avgRisk * 1.2), 10) // Slightly higher risk awareness
-      },
-      'portfolio-manager': {
-        ...baseAnalytics
-        // Portfolio manager tracks all positions
-      }
-    };
-  }
-
-  // Run AI agent logic with actual blockchain interactions
-  public async runAgentAction(address: string, agentType: AgentType): Promise<void> {
-    const settings = this.getAgentSettings(address, agentType);
-    
-    if (!settings.isActive) {
-      toast.error(`${this.getAgentName(agentType)} is not active. Please activate it first.`);
-      return;
-    }
-    
-    // Check if wallet is connected
-    const walletInfo = walletService.getCurrentWallet();
-    if (!walletInfo) {
-      toast.error('Please connect your wallet to use AI agents');
-      return;
-    }
-    
-    // Record pending action
-    const actionId = Math.random().toString(36).substring(2, 15);
-    let actionName = '';
-    let actionDetails = '';
-    
-    switch(agentType) {
-      case 'auto-lender':
-        actionName = 'Optimizing lending positions';
-        actionDetails = `Analyzing ${settings.platforms.join(', ')} for best lending rates with ${settings.riskTolerance} risk tolerance`;
-        break;
-      case 'yield-farmer':
-        actionName = 'Rebalancing yield farming positions';
-        actionDetails = `Seeking optimal yields across ${settings.platforms.join(', ')} with ${settings.riskTolerance} risk strategy`;
-        break;
-      case 'risk-analyzer':
-        actionName = 'Analyzing portfolio risk';
-        actionDetails = 'Scanning positions for liquidation risks and market exposure';
-        break;
-      case 'portfolio-manager':
-        actionName = 'Optimizing portfolio allocation';
-        actionDetails = 'Rebalancing assets for optimal risk-adjusted returns';
-        break;
-    }
-    
-    this.recordAgentAction(address, agentType, actionName, actionDetails, 'pending');
-    
-    toast.info(`${actionName}...`, {
-      description: actionDetails
-    });
-    
-    try {
-      // Initialize ethers signer and provider
-      if (!window.ethereum) {
-        throw new Error('Ethereum provider not available');
-      }
-      
-      const provider = new ethers.BrowserProvider(window.ethereum);
-      const signer = await provider.getSigner();
-      
-      // Get contract for the specific agent
-      const contractAddress = agentContractAddresses[agentType];
-      
-      // Verify the contract exists on this network
-      console.log(`Checking if contract ${contractAddress} exists on the network...`);
-      const code = await provider.getCode(contractAddress);
-      if (code === '0x' || code === '0x0') {
-        throw new Error(`Contract not deployed on this network. Please switch to a supported network.`);
-      }
-      
-      console.log(`Creating contract instance for ${agentType} at ${contractAddress}`);
-      const contract = new ethers.Contract(contractAddress, agentContractABI, signer);
-      
-      // Get current gas price
-      const feeData = await provider.getFeeData();
-      console.log("Current fee data:", feeData);
-      
-      // Set gas price based on settings and current network conditions
-      const maxFeePerGas = feeData.maxFeePerGas ? 
-        ethers.parseUnits(Math.min(settings.maxGasFee, Number(ethers.formatUnits(feeData.maxFeePerGas, 'gwei'))).toString(), 'gwei') :
-        ethers.parseUnits(settings.maxGasFee.toString(), 'gwei');
-      
-      const maxPriorityFeePerGas = feeData.maxPriorityFeePerGas ?
-        feeData.maxPriorityFeePerGas :
-        ethers.parseUnits('1.5', 'gwei');
-      
-      // Convert risk tolerance to numeric value
-      const riskLevel = riskLevelMap[settings.riskTolerance];
-      
-      console.log(`Executing strategy with risk level ${riskLevel}, max fee: ${ethers.formatUnits(maxFeePerGas, 'gwei')} gwei`);
-      
-      // Prepare transaction object
-      const txOptions: any = {
-        gasLimit: 1000000 // Adjust as needed
-      };
-      
-      // Use EIP-1559 fee structure if supported by the network
-      if (feeData.maxFeePerGas) {
-        txOptions.maxFeePerGas = maxFeePerGas;
-        txOptions.maxPriorityFeePerGas = maxPriorityFeePerGas;
-      } else {
-        // Fall back to legacy gas price for networks that don't support EIP-1559
-        txOptions.gasPrice = feeData.gasPrice;
-      }
-      
-      // Execute the smart contract transaction
-      console.log("Sending transaction with options:", txOptions);
-      const tx = await contract.executeStrategy(riskLevel, txOptions);
-      console.log("Transaction sent:", tx);
-      
-      toast.info("Transaction sent to blockchain", {
-        description: `Transaction hash: ${tx.hash.substring(0, 10)}...`,
-        action: {
-          label: 'View TX',
-          onClick: () => {
-            const network = provider.getNetwork();
-            network.then(net => {
-              const explorerUrl = this.getExplorerUrl(net.chainId.toString(), tx.hash);
-              window.open(explorerUrl, '_blank');
-            });
-          }
-        }
-      });
-      
-      // Wait for transaction confirmation
-      console.log("Waiting for transaction confirmation...");
-      const receipt = await tx.wait();
-      console.log("Transaction confirmed:", receipt);
-      
-      // Get transaction hash from receipt
-      const txHash = receipt.hash;
-      
-      // Update the action to completed with the real transaction hash
-      this.actions[address] = this.actions[address].map(action => {
-        if (action.action === actionName && action.status === 'pending') {
-          return { ...action, status: 'completed', txHash };
-        }
-        return action;
-      });
-      
-      // Refresh positions after transaction
-      await this.fetchDefiPositions(address);
-      
-      // Update analytics with new data
-      this.generateAnalytics(address);
-      
-      // Notify listeners
-      this.notifyListeners(address, agentType);
-      
-      toast.success(`${this.getAgentName(agentType)} completed action successfully`, {
-        description: `Transaction confirmed with hash: ${txHash.substring(0, 10)}...`,
-        action: {
-          label: 'View TX',
-          onClick: () => {
-            const explorerUrl = this.getExplorerUrl(receipt.chainId.toString(), txHash);
-            window.open(explorerUrl, '_blank');
-          }
-        }
-      });
-      
-    } catch (error: any) {
-      console.error('Agent action failed:', error);
-      
-      // Update the action to failed
-      this.actions[address] = this.actions[address].map(action => {
-        if (action.action === actionName && action.status === 'pending') {
-          return { ...action, status: 'failed', details: actionDetails + ` - Error: ${error.message || 'Unknown error'}` };
-        }
-        return action;
-      });
-      
-      // Notify listeners
-      this.notifyListeners(address, agentType);
-      
-      // If this is a user rejection, show appropriate message
-      if (error.code === 4001) { // User denied transaction
-        toast.error(`${this.getAgentName(agentType)} action cancelled`, {
-          description: `You rejected the transaction request`
-        });
-      } else if (error.code === 'INSUFFICIENT_FUNDS') {
-        toast.error(`${this.getAgentName(agentType)} action failed`, {
-          description: `Insufficient funds to execute this transaction`
-        });
-      } else if (error.message && error.message.includes('contract not deployed')) {
-        toast.error(`${this.getAgentName(agentType)} action failed`, {
-          description: `Smart contract not available on this network. Please switch networks.`
-        });
-      } else {
-        toast.error(`${this.getAgentName(agentType)} action failed`, {
-          description: `Error: ${error.message || 'Unknown error'}`,
-          action: {
-            label: 'Details',
-            onClick: () => {
-              console.error('Detailed error:', error);
-              alert(`Detailed error: ${JSON.stringify(error, null, 2)}`);
+          // Fetch positions based on agent type
+          switch (agentType) {
+            case 'auto-lender': {
+              // For lending protocol positions
+              const lendingPositions = await contract.getUserPositions(walletAddress);
+              
+              if (lendingPositions && lendingPositions.length > 0) {
+                for (const pos of lendingPositions) {
+                  positions.push({
+                    assetAddress: pos.poolAddress,
+                    assetName: `Lending Position ${positions.length + 1}`,
+                    platform: 'Aave', // In a real app, would be determined from the pool address
+                    balance: Number(ethers.formatEther(pos.balance)),
+                    valueUSD: Number(ethers.formatEther(pos.valueUSD)) * 1800, // Convert to USD assuming ETH price
+                    apy: Number(pos.apy) / 100, // Convert basis points to percentage
+                    risk: 3, // Example risk score
+                  });
+                }
+              }
+              break;
             }
+            
+            case 'yield-farmer': {
+              // For yield farming positions
+              const farmPositions = await contract.getUserFarmPositions(walletAddress);
+              
+              if (farmPositions && farmPositions.length > 0) {
+                for (const pos of farmPositions) {
+                  positions.push({
+                    assetAddress: pos.farmAddress,
+                    assetName: `Yield Farm ${positions.length + 1}`,
+                    platform: 'Uniswap', // In a real app, would be determined from the farm address
+                    balance: Number(ethers.formatEther(pos.stakedAmount)),
+                    valueUSD: Number(ethers.formatEther(pos.valueUSD)) * 1800, // Convert to USD assuming ETH price
+                    apy: 5 + Math.random() * 10, // Example APY
+                    risk: 5, // Example risk score
+                  });
+                }
+              }
+              break;
+            }
+            
+            case 'portfolio-manager': {
+              // For portfolio assets
+              const portfolioAssets = await contract.getPortfolioAssets(walletAddress);
+              
+              if (portfolioAssets && portfolioAssets.length > 0) {
+                for (const asset of portfolioAssets) {
+                  positions.push({
+                    assetAddress: asset.assetAddress,
+                    assetName: asset.assetName,
+                    platform: 'Multiple', // In a real app, would be determined from the asset
+                    balance: Number(ethers.formatEther(asset.balance)),
+                    valueUSD: Number(ethers.formatEther(asset.valueUSD)) * 1800, // Convert to USD assuming ETH price
+                    apy: 3 + Math.random() * 8, // Example APY
+                    risk: 4, // Example risk score
+                  });
+                }
+              }
+              break;
+            }
+            
+            default:
+              break;
           }
-        });
+        } catch (error) {
+          console.error(`Error fetching positions from ${agentType} contract:`, error);
+        }
       }
+      
+      // Store positions in memory
+      this.positions[walletAddress] = positions;
+      this.notifySubscribers(walletAddress);
+      
+      return positions;
+    } catch (error) {
+      console.error("Error fetching DeFi positions:", error);
+      return [];
     }
   }
-
-  // Get appropriate block explorer URL based on chain ID
-  private getExplorerUrl(chainId: string, txHash: string): string {
-    // Remove "0x" prefix if it exists
-    if (chainId.startsWith('0x')) {
-      chainId = parseInt(chainId, 16).toString();
+  
+  // Force refresh positions from blockchain
+  async forceRefreshPositions(walletAddress: string): Promise<void> {
+    if (!walletAddress) {
+      return;
     }
     
-    console.log(`Getting explorer URL for chain ID: ${chainId}, TX: ${txHash}`);
-    
-    switch (chainId) {
-      case '1': return `https://etherscan.io/tx/${txHash}`;
-      case '5': return `https://goerli.etherscan.io/tx/${txHash}`;
-      case '11155111': return `https://sepolia.etherscan.io/tx/${txHash}`;
-      case '42161': return `https://arbiscan.io/tx/${txHash}`;
-      case '137': return `https://polygonscan.com/tx/${txHash}`;
-      case '56': return `https://bscscan.com/tx/${txHash}`;
-      case '43114': return `https://snowtrace.io/tx/${txHash}`;
-      default: return `https://etherscan.io/tx/${txHash}`;
+    try {
+      toast.info('Scanning blockchain for DeFi positions...');
+      await this.fetchDefiPositions(walletAddress);
+      
+      // Also refresh analytics for all agent types
+      for (const agentType of Object.keys(CONTRACT_ADDRESSES) as AgentType[]) {
+        await this.fetchAgentAnalytics(walletAddress, agentType);
+      }
+      
+      toast.success('DeFi positions updated');
+    } catch (error) {
+      console.error("Error refreshing positions:", error);
+      toast.error('Failed to refresh DeFi positions');
     }
   }
-
-  // Subscribe to changes
-  public subscribe(listener: (address: string, agentType: AgentType) => void): () => void {
-    this.listeners.push(listener);
+  
+  // Fetch agent analytics from the blockchain
+  async fetchAgentAnalytics(walletAddress: string, agentType: AgentType): Promise<AgentAnalytics> {
+    this.initializeDefaultAnalytics(walletAddress, agentType);
+    
+    if (!walletAddress) {
+      return this.analytics[walletAddress][agentType];
+    }
+    
+    try {
+      // Check if wallet is connected to a supported network
+      const isNetworkSupported = await walletService.isNetworkSupported();
+      if (!isNetworkSupported) {
+        console.warn('Unsupported network for fetching agent analytics');
+        return this.analytics[walletAddress][agentType];
+      }
+      
+      // Get the appropriate contract
+      const contractAddress = CONTRACT_ADDRESSES[agentType];
+      const abi = this.agentABIs[agentType];
+      const contract = await walletService.getContract(contractAddress, abi);
+      
+      if (!contract) {
+        return this.analytics[walletAddress][agentType];
+      }
+      
+      let analyticsData: AgentAnalytics;
+      
+      // Fetch analytics based on agent type
+      switch (agentType) {
+        case 'portfolio-manager': {
+          // For portfolio manager, we can get comprehensive analytics
+          const portfolio = await contract.getUserPortfolio(walletAddress);
+          
+          analyticsData = {
+            totalValueLocked: Number(ethers.formatEther(portfolio.totalValueUSD)) * 1800, // Convert to USD assuming ETH price
+            riskScore: Number(portfolio.riskScore),
+            dailyYield: Number(ethers.formatEther(portfolio.dailyYield)) * 1800, // Convert to USD assuming ETH price
+            weeklyYield: Number(ethers.formatEther(portfolio.weeklyYield)) * 1800, // Convert to USD assuming ETH price
+            monthlyYield: Number(ethers.formatEther(portfolio.monthlyYield)) * 1800, // Convert to USD assuming ETH price
+            lastRebalance: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000), // Example: 3 days ago
+          };
+          break;
+        }
+        
+        case 'risk-analyzer': {
+          // For risk analyzer, focus on risk metrics
+          const riskMetrics = await contract.getRiskMetrics(walletAddress);
+          
+          // Get positions to calculate TVL
+          const positions = await this.fetchDefiPositions(walletAddress);
+          const tvl = positions.reduce((sum, pos) => sum + pos.valueUSD, 0);
+          
+          analyticsData = {
+            totalValueLocked: tvl,
+            riskScore: Number(riskMetrics.overallRiskScore),
+            dailyYield: tvl * 0.001, // Estimate based on TVL
+            weeklyYield: tvl * 0.007, // Estimate based on TVL
+            monthlyYield: tvl * 0.03, // Estimate based on TVL
+          };
+          break;
+        }
+        
+        default: {
+          // For other agents, estimate based on positions
+          const positions = await this.fetchDefiPositions(walletAddress);
+          const tvl = positions.reduce((sum, pos) => sum + pos.valueUSD, 0);
+          const avgRisk = positions.length > 0 
+            ? positions.reduce((sum, pos) => sum + pos.risk, 0) / positions.length 
+            : 5;
+            
+          analyticsData = {
+            totalValueLocked: tvl,
+            riskScore: Math.round(avgRisk),
+            dailyYield: tvl * 0.002, // Estimate based on TVL
+            weeklyYield: tvl * 0.014, // Estimate based on TVL
+            monthlyYield: tvl * 0.06, // Estimate based on TVL
+          };
+        }
+      }
+      
+      // Update analytics in memory
+      this.analytics[walletAddress][agentType] = analyticsData;
+      this.notifySubscribers(walletAddress, agentType);
+      
+      return analyticsData;
+    } catch (error) {
+      console.error(`Error fetching ${agentType} analytics:`, error);
+      return this.analytics[walletAddress][agentType];
+    }
+  }
+  
+  // Update settings on the blockchain
+  private async updateSettingsOnChain(
+    walletAddress: string, 
+    agentType: AgentType, 
+    settings: AgentSettings
+  ): Promise<void> {
+    if (!walletAddress) {
+      return;
+    }
+    
+    // Check if wallet is connected to a supported network
+    const isNetworkSupported = await walletService.isNetworkSupported();
+    if (!isNetworkSupported) {
+      throw new Error('Unsupported network for updating settings');
+    }
+    
+    // Get the appropriate contract
+    const contractAddress = CONTRACT_ADDRESSES[agentType];
+    const abi = this.agentABIs[agentType];
+    const contract = await walletService.getContractWithSigner(contractAddress, abi);
+    
+    if (!contract) {
+      throw new Error('Failed to connect to contract');
+    }
+    
+    // Get current gas price
+    const gasPrice = await walletService.getGasPrice();
+    
+    try {
+      // Only the portfolio manager has a settings update function
+      if (agentType === 'portfolio-manager') {
+        const tx = await contract.updatePortfolioSettings(
+          walletAddress,
+          {
+            riskTolerance: settings.riskTolerance,
+            autoRebalance: settings.autoRebalance,
+            maxGasFee: settings.maxGasFee
+          },
+          { gasPrice }
+        );
+        
+        // Wait for transaction confirmation
+        await tx.wait();
+      } else {
+        // For other contracts, we just update the settings in memory
+        // In a real app, each contract would have its own settings update function
+        console.log(`Settings for ${agentType} updated in memory only`);
+      }
+    } catch (error) {
+      console.error(`Error updating ${agentType} settings on-chain:`, error);
+      throw error;
+    }
+  }
+  
+  // Subscribe to agent service updates
+  subscribe(callback: AgentCallback): () => void {
+    this.subscribers.push(callback);
+    
     // Return unsubscribe function
     return () => {
-      this.listeners = this.listeners.filter(l => l !== listener);
+      this.subscribers = this.subscribers.filter(cb => cb !== callback);
     };
   }
-
-  // Notify all listeners about changes
-  private notifyListeners(address: string, agentType: AgentType): void {
-    this.listeners.forEach(listener => listener(address, agentType));
+  
+  // Notify subscribers of updates
+  private notifySubscribers(address: string, agentType?: AgentType) {
+    for (const callback of this.subscribers) {
+      callback(address, agentType);
+    }
   }
 }
 
-// Singleton instance
-export const aiAgentService = new AIAgentService();
+const aiAgentService = new AIAgentService();
 export default aiAgentService;
