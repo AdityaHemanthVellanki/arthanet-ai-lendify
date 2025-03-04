@@ -1,5 +1,6 @@
 
 import { toast } from 'sonner';
+import { ethers } from 'ethers';
 
 export interface WalletInfo {
   address: string;
@@ -90,13 +91,19 @@ class WalletService {
     }
 
     try {
+      // Request accounts access
       const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+      
+      // Get current chain ID
       const chainId = await window.ethereum.request({ method: 'eth_chainId' });
+      
+      // Get account balance
       const balance = await window.ethereum.request({
         method: 'eth_getBalance',
         params: [accounts[0], 'latest'],
       });
 
+      // Format wallet info
       const walletInfo: WalletInfo = {
         address: accounts[0],
         chainId,
@@ -104,6 +111,7 @@ class WalletService {
         walletType: 'MetaMask',
       };
 
+      // Update state and notify listeners
       this.currentWallet = walletInfo;
       this.notifyListeners();
       

@@ -21,7 +21,7 @@ const AgentDashboard: React.FC<AgentDashboardProps> = ({
   icon
 }) => {
   return (
-    <div className="pt-32 p-8"> {/* Add pt-32 for padding-top to account for fixed header */}
+    <div className="pt-32 p-8"> {/* Keep padding-top to avoid header overlap */}
       <div className="max-w-7xl mx-auto">
         <div className="mb-8 flex items-center justify-between">
           <div className="flex items-center space-x-4">

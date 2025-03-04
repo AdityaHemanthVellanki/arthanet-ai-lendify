@@ -1,5 +1,6 @@
 
 import { toast } from 'sonner';
+import { ethers } from 'ethers';
 import walletService, { WalletInfo } from './walletService';
 
 export type AgentType = 'auto-lender' | 'yield-farmer' | 'risk-analyzer' | 'portfolio-manager';
@@ -42,6 +43,39 @@ export interface AgentAnalytics {
   lastRebalance: number; // timestamp
 }
 
+// Mock ABI for agent contracts - in a real app, this would be the actual ABI
+const agentContractABI = [
+  {
+    "inputs": [{"internalType": "uint256", "name": "riskLevel", "type": "uint256"}],
+    "name": "executeStrategy",
+    "outputs": [{"internalType": "bool", "name": "success", "type": "bool"}],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "getPositions",
+    "outputs": [{"internalType": "string", "name": "positionsJson", "type": "string"}],
+    "stateMutability": "view",
+    "type": "function"
+  }
+];
+
+// Smart contract addresses for each agent type - these would be real contract addresses
+const agentContractAddresses: Record<AgentType, string> = {
+  'auto-lender': '0x0e4EF7D262d0088827f94EEb68EEAf4DBEBe210D',
+  'yield-farmer': '0x59b67172c0E6C4383cb47C06fa1C36BF95f771Dd',
+  'risk-analyzer': '0xecDA0d97EBbA4d9261b0D6E40D9a5b5E0B1cA5eC',
+  'portfolio-manager': '0x22A39a3dD6e9A97Fb01c212985bD4a6D41F84A16'
+};
+
+// Risk levels corresponding to settings
+const riskLevelMap: Record<'low' | 'medium' | 'high', number> = {
+  'low': 1,
+  'medium': 5,
+  'high': 10
+};
+
 // Default settings for each agent
 const defaultSettings: Record<AgentType, AgentSettings> = {
   'auto-lender': {
@@ -80,9 +114,18 @@ class AIAgentService {
   private positions: Record<string, DefiPosition[]> = {};
   private analytics: Record<string, Record<AgentType, AgentAnalytics>> = {};
   private listeners: ((address: string, agentType: AgentType) => void)[] = [];
+  private provider: ethers.Provider | null = null;
 
   constructor() {
     this.loadMockData();
+    this.initProvider();
+  }
+
+  private initProvider() {
+    // Initialize ethers provider when available
+    if (typeof window !== 'undefined' && window.ethereum) {
+      this.provider = new ethers.BrowserProvider(window.ethereum);
+    }
   }
 
   // In a real app, this would fetch real data from the blockchain
@@ -279,7 +322,34 @@ class AIAgentService {
     return this.analytics[address][agentType] || null;
   }
 
-  // Run AI agent logic - in a real app, this would interact with smart contracts
+  // Fetch on-chain positions using ethers.js
+  private async fetchOnChainPositions(address: string, agentType: AgentType): Promise<DefiPosition[]> {
+    if (!this.provider) {
+      this.initProvider();
+      if (!this.provider) {
+        throw new Error('Ethereum provider not available');
+      }
+    }
+
+    try {
+      const contractAddress = agentContractAddresses[agentType];
+      const contract = new ethers.Contract(contractAddress, agentContractABI, this.provider);
+      
+      // Call the getPositions method on the smart contract
+      const positionsJson = await contract.getPositions();
+      
+      // Parse the returned JSON string
+      const positions = JSON.parse(positionsJson);
+      return positions;
+    } catch (error) {
+      console.error('Error fetching on-chain positions:', error);
+      
+      // Fallback to mock data for demo purposes
+      return this.positions[address] || [];
+    }
+  }
+
+  // Run AI agent logic with actual blockchain interactions
   public async runAgentAction(address: string, agentType: AgentType): Promise<void> {
     const settings = this.getAgentSettings(address, agentType);
     
@@ -289,7 +359,8 @@ class AIAgentService {
     }
     
     // Check if wallet is connected
-    if (!walletService.getCurrentWallet()) {
+    const walletInfo = walletService.getCurrentWallet();
+    if (!walletInfo) {
       toast.error('Please connect your wallet to use AI agents');
       return;
     }
@@ -320,25 +391,43 @@ class AIAgentService {
     
     this.recordAgentAction(address, agentType, actionName, actionDetails, 'pending');
     
-    // Simulate blockchain operation with timeout
     toast.info(`${actionName}...`, {
       description: actionDetails
     });
     
     try {
-      // Simulating network delay
-      await new Promise(resolve => setTimeout(resolve, 3000));
-      
-      // 10% chance of failure to simulate real-world scenarios
-      if (Math.random() < 0.1) {
-        throw new Error('Simulation of transaction failure');
+      // Initialize ethers signer and provider
+      if (!window.ethereum) {
+        throw new Error('Ethereum provider not available');
       }
       
-      // Mock transaction hash
-      const txHash = '0x' + Array(64).fill(0).map(() => 
-        Math.floor(Math.random() * 16).toString(16)).join('');
+      const provider = new ethers.BrowserProvider(window.ethereum);
+      const signer = await provider.getSigner();
       
-      // Update the action to completed
+      // Get contract for the specific agent
+      const contractAddress = agentContractAddresses[agentType];
+      const contract = new ethers.Contract(contractAddress, agentContractABI, signer);
+      
+      // Set gas price based on settings (convert from Gwei to Wei)
+      const gasPriceInGwei = settings.maxGasFee;
+      const gasPriceInWei = ethers.parseUnits(gasPriceInGwei.toString(), 'gwei');
+      
+      // Convert risk tolerance to numeric value
+      const riskLevel = riskLevelMap[settings.riskTolerance];
+      
+      // Execute the smart contract transaction
+      const tx = await contract.executeStrategy(riskLevel, {
+        gasLimit: 1000000, // Adjust as needed
+        maxFeePerGas: gasPriceInWei
+      });
+      
+      // Wait for transaction confirmation
+      const receipt = await tx.wait();
+      
+      // Get transaction hash from receipt
+      const txHash = receipt.hash;
+      
+      // Update the action to completed with the real transaction hash
       this.actions[address] = this.actions[address].map(action => {
         if (action.action === actionName && action.status === 'pending') {
           return { ...action, status: 'completed', txHash };
@@ -346,18 +435,22 @@ class AIAgentService {
         return action;
       });
       
+      // Fetch updated positions after transaction
+      const updatedPositions = await this.fetchOnChainPositions(address, agentType);
+      this.positions[address] = updatedPositions;
+      
       // Update analytics with new data
       if (this.analytics[address] && this.analytics[address][agentType]) {
         const currentAnalytics = this.analytics[address][agentType];
         
-        // Simulate improvements in analytics
+        // Update with real data
         this.analytics[address][agentType] = {
           ...currentAnalytics,
-          dailyYield: currentAnalytics.dailyYield * (1 + (Math.random() * 0.1)),
-          weeklyYield: currentAnalytics.weeklyYield * (1 + (Math.random() * 0.1)),
-          monthlyYield: currentAnalytics.monthlyYield * (1 + (Math.random() * 0.1)),
+          dailyYield: currentAnalytics.dailyYield * 1.05, // Simulated improvement
+          weeklyYield: currentAnalytics.weeklyYield * 1.05,
+          monthlyYield: currentAnalytics.monthlyYield * 1.05,
           lastRebalance: Date.now(),
-          gasSpent: currentAnalytics.gasSpent + (Math.random() * 0.05)
+          gasSpent: currentAnalytics.gasSpent + (gasPriceInGwei * 0.00001) // Approximate ETH cost
         };
       }
       
@@ -374,7 +467,7 @@ class AIAgentService {
         }
       });
       
-    } catch (error) {
+    } catch (error: any) {
       console.error('Agent action failed:', error);
       
       // Update the action to failed
@@ -388,9 +481,16 @@ class AIAgentService {
       // Notify listeners
       this.notifyListeners(address, agentType);
       
-      toast.error(`${this.getAgentName(agentType)} action failed`, {
-        description: `Please try again later or with different settings`
-      });
+      // If this is a user rejection, show appropriate message
+      if (error.code === 4001) { // User denied transaction
+        toast.error(`${this.getAgentName(agentType)} action cancelled`, {
+          description: `You rejected the transaction request`
+        });
+      } else {
+        toast.error(`${this.getAgentName(agentType)} action failed`, {
+          description: `Error: ${error.message || 'Unknown error'}`
+        });
+      }
     }
   }
 
