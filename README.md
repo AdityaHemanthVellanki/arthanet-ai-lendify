@@ -1,69 +1,16 @@
-# Welcome to your Lovable project
+## ArthaNet 🚀 – AI-Powered Credit Scoring & DeFi Automation
 
-## Project info
+ArthaNet is an AI-driven Web3 platform that revolutionizes on-chain credit scoring and DeFi automation. It uses machine learning and blockchain analytics to assess creditworthiness, enabling trust-based lending with reduced collateral. The platform automates staking, lending, and portfolio management, ensuring optimized risk assessment and capital efficiency.
 
-**URL**: https://lovable.dev/projects/1d4f5172-5cf0-4c89-99a8-d391382f71d4
+## Key Features
+✅ AI-Powered Credit Scoring – On-chain ML models analyze wallet history, transactions, and staking behavior.
+✅ DeFi Lending Optimization – AI automates lending, borrowing, and capital allocation.
+✅ Smart Contract Execution – Automated strategies for yield farming, risk management, and asset rebalancing.
+✅ Zero-Knowledge Privacy – Secure, trustless credit scoring without exposing financial history.
+✅ Seamless Web3 Integration – Works with MetaMask, Solana Phantom, Coinbase Wallet, and The Graph API.
 
-## How can I edit this code?
-
-There are several ways of editing your application.
-
-**Use Lovable**
-
-Simply visit the [Lovable Project](https://lovable.dev/projects/1d4f5172-5cf0-4c89-99a8-d391382f71d4) and start prompting.
-
-Changes made via Lovable will be committed automatically to this repo.
-
-**Use your preferred IDE**
-
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
-
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
-
-Follow these steps:
-
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
-
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
-
-# Step 3: Install the necessary dependencies.
-npm i
-
-# Step 4: Start the development server with auto-reloading and an instant preview.
-npm run dev
-```
-
-**Edit a file directly in GitHub**
-
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
-
-**Use GitHub Codespaces**
-
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
-
-## What technologies are used for this project?
-
-This project is built with .
-
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
-
-## How can I deploy this project?
-
-Simply open [Lovable](https://lovable.dev/projects/1d4f5172-5cf0-4c89-99a8-d391382f71d4) and click on Share -> Publish.
-
-## I want to use a custom domain - is that possible?
-
-We don't support custom domains (yet). If you want to deploy your project under your own domain then we recommend using Netlify. Visit our docs for more details: [Custom domains](https://docs.lovable.dev/tips-tricks/custom-domain/)
+## Target Users
+📌 DeFi users seeking better lending terms.
+📌 Lending protocols optimizing capital allocation.
+📌 Institutions & investors automating portfolio management.
+📌 Web3 newcomers needing AI-driven financial tools.
