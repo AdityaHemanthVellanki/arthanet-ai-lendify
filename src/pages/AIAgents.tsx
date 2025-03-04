@@ -1,15 +1,22 @@
+
 import React, { useEffect, useState } from 'react';
+import { useNavigate, Routes, Route, Link, Outlet } from 'react-router-dom';
 import Navbar from '@/components/layout/Navbar';
 import Footer from '@/components/layout/Footer';
 import GlassCard from '@/components/ui/GlassCard';
 import ConnectWalletButton from '@/components/ui/ConnectWalletButton';
 import { motion } from 'framer-motion';
-import { Bot, Brain, TrendingUp, GitBranch, Maximize, ArrowRight, Play, Info, Link, Shield } from 'lucide-react';
+import { Bot, Brain, TrendingUp, GitBranch, Maximize, ArrowRight, Play, Info, Link as LinkIcon, Shield } from 'lucide-react';
 import { toast } from 'sonner';
 import walletService from '@/services/walletService';
+import AgentDashboard from '@/components/ai-agents/AgentDashboard';
+import { AgentType } from '@/services/aiAgentService';
+import { Button } from '@/components/ui/button';
 
-const AIAgents = () => {
+// Define the main AI Agents page
+const AgentsHome = () => {
   const [isWalletConnected, setIsWalletConnected] = useState(false);
+  const navigate = useNavigate();
 
   useEffect(() => {
     window.scrollTo(0, 0);
@@ -22,17 +29,6 @@ const AIAgents = () => {
       unsubscribe();
     };
   }, []);
-
-  const handleAgentInteraction = (agentName: string) => {
-    if (!isWalletConnected) {
-      toast.info('Please connect your wallet to interact with AI agents');
-      return;
-    }
-
-    toast.info(`${agentName} will be available in the next update`, {
-      description: 'AI agents are currently in development'
-    });
-  };
 
   const agents = [
     {
@@ -88,6 +84,15 @@ const AIAgents = () => {
       glow: 'purple' as const
     }
   ];
+
+  const handleAgentInteraction = (agentId: string) => {
+    if (!isWalletConnected) {
+      toast.info('Please connect your wallet to interact with AI agents');
+      return;
+    }
+
+    navigate(`/ai-agents/${agentId}`);
+  };
 
   return (
     <div className="bg-arthanet-charcoal min-h-screen">
@@ -197,21 +202,22 @@ const AIAgents = () => {
                     </div>
                     
                     <div className="mt-auto flex justify-between">
-                      <button
-                        onClick={() => handleAgentInteraction(agent.name)}
-                        className="flex items-center text-arthanet-blue hover:text-white transition-colors text-sm font-medium"
+                      <Button
+                        onClick={() => handleAgentInteraction(agent.id)}
+                        className="flex items-center text-white bg-blue-purple-gradient hover:opacity-90"
                       >
                         <Play className="h-4 w-4 mr-1" />
-                        Activate Agent
-                      </button>
+                        {isWalletConnected ? 'Launch Agent' : 'Connect Wallet'}
+                      </Button>
                       
-                      <button
+                      <Button
+                        variant="ghost"
                         onClick={() => toast.info('Documentation will be available soon')}
-                        className="flex items-center text-white/50 hover:text-white transition-colors text-sm"
+                        className="flex items-center text-white/50 hover:text-white transition-colors"
                       >
                         <Info className="h-4 w-4 mr-1" />
                         Learn More
-                      </button>
+                      </Button>
                     </div>
                   </GlassCard>
                 </motion.div>
@@ -243,7 +249,7 @@ const AIAgents = () => {
                   {
                     title: "Wallet Connection & Data Analysis",
                     description: "AI agents securely access your wallet data and analyze your transaction history, assets, and DeFi positions.",
-                    icon: <Link className="h-5 w-5 text-white" />
+                    icon: <LinkIcon className="h-5 w-5 text-white" />
                   },
                   {
                     title: "Market Condition Monitoring",
@@ -300,21 +306,21 @@ const AIAgents = () => {
                 {!isWalletConnected ? (
                   <ConnectWalletButton />
                 ) : (
-                  <button
-                    onClick={() => handleAgentInteraction('AI Auto-Lender')}
+                  <Button
+                    onClick={() => handleAgentInteraction('auto-lender')}
                     className="inline-flex items-center bg-blue-purple-gradient hover:opacity-90 transition-all duration-300 text-white font-medium rounded-lg px-6 py-3"
                   >
                     <Bot className="mr-2 h-4 w-4" />
                     Deploy AI Agent
-                  </button>
+                  </Button>
                 )}
-                <a 
-                  href="/how-it-works" 
+                <Link 
+                  to="/how-it-works" 
                   className="inline-flex items-center justify-center px-6 py-3 rounded-lg border border-white/20 bg-white/5 hover:bg-white/10 transition-all duration-300 text-white font-medium"
                 >
                   Learn How It Works
                   <ArrowRight size={16} className="ml-2" />
-                </a>
+                </Link>
               </div>
             </GlassCard>
           </div>
@@ -323,6 +329,80 @@ const AIAgents = () => {
       
       <Footer />
     </div>
+  );
+};
+
+// Agent Detail Pages
+const AutoLenderAgent = () => {
+  return (
+    <div className="bg-arthanet-charcoal min-h-screen">
+      <Navbar />
+      <AgentDashboard 
+        agentType="auto-lender"
+        agentName="AI Auto-Lender"
+        agentDescription="Optimizes lending positions across DeFi protocols for maximum APY with minimal risk"
+        icon={<TrendingUp className="h-6 w-6 text-arthanet-blue" />}
+      />
+      <Footer />
+    </div>
+  );
+};
+
+const YieldFarmerAgent = () => {
+  return (
+    <div className="bg-arthanet-charcoal min-h-screen">
+      <Navbar />
+      <AgentDashboard 
+        agentType="yield-farmer"
+        agentName="Smart Yield Farmer"
+        agentDescription="Maximizes yield farming returns with intelligent strategy allocation"
+        icon={<Brain className="h-6 w-6 text-arthanet-purple" />}
+      />
+      <Footer />
+    </div>
+  );
+};
+
+const RiskAnalyzerAgent = () => {
+  return (
+    <div className="bg-arthanet-charcoal min-h-screen">
+      <Navbar />
+      <AgentDashboard 
+        agentType="risk-analyzer"
+        agentName="Risk Analyzer"
+        agentDescription="Continuously monitors your positions to prevent liquidations and reduce risk"
+        icon={<Shield className="h-6 w-6 text-arthanet-blue" />}
+      />
+      <Footer />
+    </div>
+  );
+};
+
+const PortfolioManagerAgent = () => {
+  return (
+    <div className="bg-arthanet-charcoal min-h-screen">
+      <Navbar />
+      <AgentDashboard 
+        agentType="portfolio-manager"
+        agentName="Portfolio Manager"
+        agentDescription="Holistic portfolio management across all your DeFi positions"
+        icon={<Maximize className="h-6 w-6 text-arthanet-purple" />}
+      />
+      <Footer />
+    </div>
+  );
+};
+
+// Main AI Agents component with routing
+const AIAgents = () => {
+  return (
+    <Routes>
+      <Route index element={<AgentsHome />} />
+      <Route path="auto-lender" element={<AutoLenderAgent />} />
+      <Route path="yield-farmer" element={<YieldFarmerAgent />} />
+      <Route path="risk-analyzer" element={<RiskAnalyzerAgent />} />
+      <Route path="portfolio-manager" element={<PortfolioManagerAgent />} />
+    </Routes>
   );
 };
 
