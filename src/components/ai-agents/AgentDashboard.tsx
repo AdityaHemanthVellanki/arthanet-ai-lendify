@@ -1,11 +1,12 @@
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import GlassCard from '@/components/ui/GlassCard';
 import DefiPositionsComponent from './DefiPositions';
 import AgentAnalyticsComponent from './AgentAnalytics';
 import AgentActionsComponent from './AgentActions';
 import AgentControls from './AgentControls';
 import { AgentType } from '@/services/aiAgentService';
+import walletService from '@/services/walletService';
 
 interface AgentDashboardProps {
   agentType: AgentType;
@@ -20,6 +21,23 @@ const AgentDashboard: React.FC<AgentDashboardProps> = ({
   agentDescription,
   icon
 }) => {
+  const [walletConnected, setWalletConnected] = useState(false);
+  
+  useEffect(() => {
+    // Check if wallet is already connected
+    const currentWallet = walletService.getCurrentWallet();
+    setWalletConnected(!!currentWallet);
+    
+    // Subscribe to wallet changes
+    const unsubscribe = walletService.subscribe((wallet) => {
+      setWalletConnected(!!wallet);
+    });
+    
+    return () => {
+      unsubscribe();
+    };
+  }, []);
+  
   return (
     <div className="pt-32 p-8"> {/* Keep padding-top to avoid header overlap */}
       <div className="max-w-7xl mx-auto">
@@ -41,14 +59,14 @@ const AgentDashboard: React.FC<AgentDashboardProps> = ({
           <div className="lg:col-span-2 space-y-8">
             <GlassCard className="p-6">
               <h2 className="text-xl font-semibold text-white mb-4">Performance Analytics</h2>
-              <AgentAnalyticsComponent agentType={agentType} />
+              <AgentAnalyticsComponent agentType={agentType} forceWalletConnected={walletConnected} />
             </GlassCard>
             
             <AgentActionsComponent agentType={agentType} />
           </div>
           
           <div className="space-y-8">
-            <DefiPositionsComponent />
+            <DefiPositionsComponent forceWalletConnected={walletConnected} />
           </div>
         </div>
       </div>

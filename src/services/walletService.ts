@@ -12,9 +12,13 @@ export interface WalletInfo {
 class WalletService {
   private currentWallet: WalletInfo | null = null;
   private listeners: ((wallet: WalletInfo | null) => void)[] = [];
+  private provider: ethers.Provider | null = null;
+  private reconnecting: boolean = false;
 
   constructor() {
+    this.initProvider();
     this.checkIfWalletConnected();
+    
     if (typeof window !== 'undefined') {
       window.addEventListener('ethereum#initialized', this.handleEthereumInitialized);
       
@@ -22,11 +26,19 @@ class WalletService {
       if (window.ethereum) {
         window.ethereum.on('accountsChanged', this.handleAccountsChanged);
         window.ethereum.on('chainChanged', this.handleChainChanged);
+        window.ethereum.on('disconnect', this.handleDisconnect);
       }
     }
   }
 
+  private initProvider() {
+    if (typeof window !== 'undefined' && window.ethereum) {
+      this.provider = new ethers.BrowserProvider(window.ethereum);
+    }
+  }
+
   private handleEthereumInitialized = () => {
+    this.initProvider();
     this.checkIfWalletConnected();
   };
 
@@ -46,15 +58,23 @@ class WalletService {
     }
   };
 
+  private handleDisconnect = (error: { code: number; message: string }) => {
+    this.disconnectWallet();
+    toast.error(`Wallet disconnected: ${error.message}`);
+  };
+
   private checkIfWalletConnected = async () => {
-    if (window.ethereum) {
+    if (window.ethereum && !this.reconnecting) {
+      this.reconnecting = true;
       try {
         const accounts = await window.ethereum.request({ method: 'eth_accounts' });
         if (accounts && accounts.length > 0) {
-          this.connectToMetaMask(true);
+          await this.connectToMetaMask(true);
         }
       } catch (error) {
         console.error('Error checking if wallet is connected:', error);
+      } finally {
+        this.reconnecting = false;
       }
     }
   };
@@ -158,6 +178,73 @@ class WalletService {
 
   public getCurrentWallet(): WalletInfo | null {
     return this.currentWallet;
+  }
+
+  // Get ethereum provider
+  public getProvider(): ethers.Provider | null {
+    if (!this.provider && window.ethereum) {
+      this.provider = new ethers.BrowserProvider(window.ethereum);
+    }
+    return this.provider;
+  }
+
+  // Get ethereum signer
+  public async getSigner(): Promise<ethers.Signer | null> {
+    try {
+      const provider = this.getProvider();
+      if (!provider) return null;
+      
+      return await provider.getSigner();
+    } catch (error) {
+      console.error('Error getting signer:', error);
+      return null;
+    }
+  }
+
+  // Send transaction with proper error handling
+  public async sendTransaction(tx: any): Promise<ethers.TransactionResponse | null> {
+    try {
+      const signer = await this.getSigner();
+      if (!signer) {
+        toast.error('Wallet not connected or signer not available');
+        return null;
+      }
+      
+      const txResponse = await signer.sendTransaction(tx);
+      
+      // Show transaction sent toast
+      toast.info('Transaction sent', {
+        description: `Transaction hash: ${txResponse.hash.substring(0, 10)}...`,
+        action: {
+          label: 'View',
+          onClick: () => {
+            const chainId = this.currentWallet?.chainId;
+            let explorerUrl = `https://etherscan.io/tx/${txResponse.hash}`;
+            
+            // Adjust explorer URL based on chain
+            if (chainId === '0x5') { // Goerli
+              explorerUrl = `https://goerli.etherscan.io/tx/${txResponse.hash}`;
+            } else if (chainId === '0xaa36a7') { // Sepolia
+              explorerUrl = `https://sepolia.etherscan.io/tx/${txResponse.hash}`;
+            }
+            
+            window.open(explorerUrl, '_blank');
+          }
+        }
+      });
+      
+      return txResponse;
+    } catch (error: any) {
+      console.error('Transaction error:', error);
+      
+      if (error.code === 4001) {
+        toast.error('Transaction rejected by user');
+      } else {
+        toast.error(`Transaction failed: ${error.message || 'Unknown error'}`);
+      }
+      
+      return null;
+    }
   }
 
   public subscribe(listener: (wallet: WalletInfo | null) => void): () => void {
