@@ -24,10 +24,31 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { Progress } from '@/components/ui/progress';
-import aiAgentService, { DefiPosition } from '@/services/aiAgentService';
-import walletService from '@/services/walletService';
+import { toast } from 'sonner';
 import { cn } from "@/lib/utils";
 import { ethers } from 'ethers';
+import walletService from '@/services/walletService';
+import LendingProtocolABI from '@/abis/LendingProtocolABI.json';
+import YieldFarmerABI from '@/abis/YieldFarmerABI.json';
+import PortfolioManagerABI from '@/abis/PortfolioManagerABI.json';
+import RiskAnalyzerABI from '@/abis/RiskAnalyzerABI.json';
+
+// Contract addresses for different protocols (would typically come from environment variables)
+const LENDING_PROTOCOL_ADDRESS = '0x6789012345678901234567890123456789012345';
+const YIELD_FARMER_ADDRESS = '0x7890123456789012345678901234567890123456';
+const PORTFOLIO_MANAGER_ADDRESS = '0x8901234567890123456789012345678901234567';
+const RISK_ANALYZER_ADDRESS = '0x9012345678901234567890123456789012345678';
+
+// Interface for DeFi position data
+export interface DefiPosition {
+  assetAddress: string;
+  assetName: string;
+  platform: string;
+  balance: number;
+  valueUSD: number;
+  apy: number;
+  risk: number;
+}
 
 interface DefiPositionsProps {
   forceWalletConnected?: boolean;
@@ -41,7 +62,7 @@ const DefiPositionsComponent: React.FC<DefiPositionsProps> = ({ forceWalletConne
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isFirstLoad, setIsFirstLoad] = useState(true);
   
-  // Get positions when wallet address changes
+  // Fetch on-chain data when wallet address changes
   useEffect(() => {
     const fetchOnChainData = async () => {
       setIsLoading(true);
@@ -51,21 +72,29 @@ const DefiPositionsComponent: React.FC<DefiPositionsProps> = ({ forceWalletConne
         setWalletAddress(walletInfo.address);
         
         try {
-          console.log("Fetching DeFi positions for address:", walletInfo.address);
-          // Check if we already have positions in memory
-          const cachedPositions = aiAgentService.getDefiPositions(walletInfo.address);
+          console.log("Fetching real-time DeFi positions for address:", walletInfo.address);
           
-          if (cachedPositions.length > 0) {
-            console.log("Using cached positions:", cachedPositions.length);
-            setPositions(cachedPositions);
+          // Get provider from wallet service
+          const provider = walletService.getProvider();
+          if (!provider) {
+            throw new Error("No provider available");
+          }
+          
+          // Combine positions from different protocols
+          const allPositions = await fetchAllProtocolPositions(walletInfo.address, provider);
+          
+          if (allPositions.length > 0) {
+            setPositions(allPositions);
+            console.log("Real-time positions loaded:", allPositions.length);
           } else {
-            console.log("Fetching positions from blockchain");
-            const defiPositions = await aiAgentService.fetchDefiPositions(walletInfo.address);
-            setPositions(defiPositions);
-            console.log("Positions loaded:", defiPositions.length);
+            console.log("No DeFi positions found on-chain");
+            setPositions([]);
           }
         } catch (error) {
           console.error("Error fetching on-chain positions:", error);
+          toast.error("Failed to fetch DeFi positions", {
+            description: error instanceof Error ? error.message : "Unknown error"
+          });
           setPositions([]);
         } finally {
           setIsLoading(false);
@@ -102,38 +131,152 @@ const DefiPositionsComponent: React.FC<DefiPositionsProps> = ({ forceWalletConne
     };
   }, [forceWalletConnected, walletAddress]);
   
-  // Subscribe to agent service updates
-  useEffect(() => {
-    if (!walletAddress) return;
-    
-    const unsubscribe = aiAgentService.subscribe((address) => {
-      if (address === walletAddress) {
-        console.log("Agent service updated, refreshing positions");
-        const cachedPositions = aiAgentService.getDefiPositions(address);
-        if (cachedPositions.length > 0) {
-          setPositions(cachedPositions);
-        }
-      }
-    });
-    
-    return () => {
-      unsubscribe();
-    };
-  }, [walletAddress]);
-  
   // Handle manual refresh
   const handleRefresh = async () => {
     if (!walletAddress || isRefreshing) return;
     
     setIsRefreshing(true);
     try {
-      await aiAgentService.forceRefreshPositions(walletAddress);
-      const updatedPositions = aiAgentService.getDefiPositions(walletAddress);
+      const provider = walletService.getProvider();
+      if (!provider) {
+        throw new Error("No provider available");
+      }
+      
+      // Fetch fresh positions from blockchain
+      const updatedPositions = await fetchAllProtocolPositions(walletAddress, provider);
       setPositions(updatedPositions);
+      
+      toast.success("DeFi positions refreshed", {
+        description: `Found ${updatedPositions.length} active positions`
+      });
     } catch (error) {
       console.error("Error refreshing positions:", error);
+      toast.error("Failed to refresh positions", {
+        description: error instanceof Error ? error.message : "Unknown error"
+      });
     } finally {
       setIsRefreshing(false);
+    }
+  };
+  
+  // Fetch positions from all supported protocols
+  const fetchAllProtocolPositions = async (address: string, provider: ethers.BrowserProvider): Promise<DefiPosition[]> => {
+    const allPositions: DefiPosition[] = [];
+    
+    try {
+      // 1. Fetch lending positions
+      const lendingPositions = await fetchLendingPositions(address, provider);
+      allPositions.push(...lendingPositions);
+      
+      // 2. Fetch yield farming positions
+      const yieldPositions = await fetchYieldPositions(address, provider);
+      allPositions.push(...yieldPositions);
+      
+      // 3. Get risk data for all positions
+      if (allPositions.length > 0) {
+        await enrichPositionsWithRiskData(allPositions, address, provider);
+      }
+      
+      return allPositions;
+    } catch (error) {
+      console.error("Error fetching positions from all protocols:", error);
+      return allPositions;
+    }
+  };
+  
+  // Fetch positions from lending protocols
+  const fetchLendingPositions = async (address: string, provider: ethers.BrowserProvider): Promise<DefiPosition[]> => {
+    try {
+      const contract = new ethers.Contract(LENDING_PROTOCOL_ADDRESS, LendingProtocolABI, provider);
+      const userPositions = await contract.getUserPositions(address);
+      
+      if (!userPositions || userPositions.length === 0) {
+        return [];
+      }
+      
+      // Map contract data to our interface
+      return userPositions.map((position: any) => ({
+        assetAddress: position.poolAddress,
+        assetName: `Lending Pool ${position.poolAddress.substring(0, 6)}`,
+        platform: "Lending Protocol",
+        balance: Number(ethers.formatEther(position.balance)),
+        valueUSD: Number(ethers.formatEther(position.valueUSD)) * 1800, // Approximate USD value
+        apy: Number(position.apy) / 100, // Convert basis points to percentage
+        risk: 3 // Default risk, will be updated with risk data
+      }));
+    } catch (error) {
+      console.error("Error fetching lending positions:", error);
+      return [];
+    }
+  };
+  
+  // Fetch positions from yield farming protocols
+  const fetchYieldPositions = async (address: string, provider: ethers.BrowserProvider): Promise<DefiPosition[]> => {
+    try {
+      const contract = new ethers.Contract(YIELD_FARMER_ADDRESS, YieldFarmerABI, provider);
+      const userPositions = await contract.getUserFarmPositions(address);
+      
+      if (!userPositions || userPositions.length === 0) {
+        return [];
+      }
+      
+      // Get farm details to enrich the position data
+      const farms = await contract.getAvailableYieldFarms();
+      const farmsMap = new Map();
+      
+      for (const farm of farms) {
+        farmsMap.set(farm.farmAddress.toLowerCase(), {
+          name: farm.name,
+          apy: Number(farm.apy) / 100,
+          risk: Number(farm.riskLevel)
+        });
+      }
+      
+      // Map contract data to our interface
+      return userPositions.map((position: any) => {
+        const farmAddress = position.farmAddress.toLowerCase();
+        const farmDetails = farmsMap.get(farmAddress) || { 
+          name: `Farm ${farmAddress.substring(0, 6)}`,
+          apy: 5,
+          risk: 5
+        };
+        
+        return {
+          assetAddress: position.farmAddress,
+          assetName: farmDetails.name,
+          platform: "Yield Farm",
+          balance: Number(ethers.formatEther(position.stakedAmount)),
+          valueUSD: Number(ethers.formatEther(position.valueUSD)),
+          apy: farmDetails.apy,
+          risk: farmDetails.risk
+        };
+      });
+    } catch (error) {
+      console.error("Error fetching yield positions:", error);
+      return [];
+    }
+  };
+  
+  // Enrich positions with risk data
+  const enrichPositionsWithRiskData = async (positions: DefiPosition[], address: string, provider: ethers.BrowserProvider): Promise<void> => {
+    try {
+      const contract = new ethers.Contract(RISK_ANALYZER_ADDRESS, RiskAnalyzerABI, provider);
+      
+      // Run risk analysis (this might be a transaction that costs gas)
+      // For a read-only app, you might want to skip this step
+      // await contract.runRiskAnalysis(address);
+      
+      // Get risk metrics
+      const riskMetrics = await contract.getRiskMetrics(address);
+      
+      // Apply risk metrics to positions
+      for (const position of positions) {
+        // For demo, use overall risk score; in production, you'd match by position address
+        position.risk = Math.min(Math.max(Number(riskMetrics.overallRiskScore) / 10, 1), 10);
+      }
+    } catch (error) {
+      console.error("Error enriching positions with risk data:", error);
+      // Don't throw - we'll use default risk scores if this fails
     }
   };
   
