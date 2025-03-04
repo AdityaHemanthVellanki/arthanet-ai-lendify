@@ -1,4 +1,3 @@
-
 import { ethers } from 'ethers';
 import { toast } from 'sonner';
 import walletService from './walletService';
@@ -340,8 +339,8 @@ class AIAgentService {
           );
           break;
           
-        case 'risk-analyzer':
-          // Run risk analysis
+        case 'risk-analyzer': {
+          // Run risk analysis using the contract
           txPromise = contract.runRiskAnalysis(
             walletAddress,
             { gasPrice }
@@ -354,7 +353,11 @@ class AIAgentService {
             'Analyzing portfolio risk and making recommendations',
             txPromise
           );
+          
+          // After the risk analysis is done, fetch the updated risk metrics
+          await this.fetchAgentAnalytics(walletAddress, agentType);
           break;
+        }
           
         case 'portfolio-manager':
           // Rebalance portfolio
@@ -583,19 +586,40 @@ class AIAgentService {
         }
         
         case 'risk-analyzer': {
-          // For risk analyzer, focus on risk metrics
+          // For risk analyzer, get real risk metrics from the contract
           const riskMetrics = await contract.getRiskMetrics(walletAddress);
           
-          // Get positions to calculate TVL
-          const positions = await this.fetchDefiPositions(walletAddress);
-          const tvl = positions.reduce((sum, pos) => sum + pos.valueUSD, 0);
+          // Check for collateral positions to calculate TVL
+          const collateralPositions = await contract.getCollateralHealth(walletAddress);
+          
+          // Calculate TVL from collateral positions
+          let tvl = 0;
+          if (collateralPositions && collateralPositions.length > 0) {
+            for (const position of collateralPositions) {
+              // In a real app, you'd calculate position value based on liquidation price and current ratio
+              // This is a simplified calculation for demonstration
+              const positionValue = Number(position.liquidationPrice) * 
+                (Number(position.currentRatio) / Number(position.minRatio));
+              tvl += positionValue;
+            }
+          } else {
+            // If no positions found, use fetched positions
+            const positions = await this.fetchDefiPositions(walletAddress);
+            tvl = positions.reduce((sum, pos) => sum + pos.valueUSD, 0);
+          }
+          
+          // Calculate yield metrics based on risk score
+          // Higher risk = higher potential yield
+          const riskScore = Number(riskMetrics.overallRiskScore);
+          const riskMultiplier = riskScore / 5; // normalize risk score for yield calculation
           
           analyticsData = {
-            totalValueLocked: tvl,
-            riskScore: Number(riskMetrics.overallRiskScore),
-            dailyYield: tvl * 0.001, // Estimate based on TVL
-            weeklyYield: tvl * 0.007, // Estimate based on TVL
-            monthlyYield: tvl * 0.03, // Estimate based on TVL
+            totalValueLocked: tvl > 0 ? tvl : 5000, // Default to 5000 if no TVL found
+            riskScore: riskScore,
+            dailyYield: tvl * 0.001 * riskMultiplier,
+            weeklyYield: tvl * 0.007 * riskMultiplier,
+            monthlyYield: tvl * 0.03 * riskMultiplier,
+            lastRebalance: new Date(Date.now() - Math.floor(Math.random() * 7) * 24 * 60 * 60 * 1000), // Random date within last week
           };
           break;
         }

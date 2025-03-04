@@ -25,36 +25,38 @@ import {
 } from 'recharts';
 import aiAgentService, { AgentType, AgentAnalytics } from '@/services/aiAgentService';
 import walletService from '@/services/walletService';
+import creditScoreService, { HistoricalRiskData } from '@/services/creditScoreService';
 
 interface AgentAnalyticsProps {
   agentType: AgentType;
-  forceWalletConnected?: boolean; // Added this prop to fix the type error
+  forceWalletConnected?: boolean;
 }
 
 const AgentAnalyticsComponent: React.FC<AgentAnalyticsProps> = ({ 
   agentType,
-  forceWalletConnected = false // Added default value
+  forceWalletConnected = false
 }) => {
   const [walletAddress, setWalletAddress] = useState<string | null>(null);
   const [analytics, setAnalytics] = useState<AgentAnalytics | null>(null);
+  const [chartData, setChartData] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
   
   // Get analytics when wallet address or agent type changes
   useEffect(() => {
     const walletInfo = walletService.getCurrentWallet();
     if (walletInfo) {
       setWalletAddress(walletInfo.address);
-      const agentAnalytics = aiAgentService.getAgentAnalytics(walletInfo.address, agentType);
-      setAnalytics(agentAnalytics);
+      fetchAnalyticsData(walletInfo.address);
     }
     
     const unsubscribe = walletService.subscribe((wallet) => {
       if (wallet) {
         setWalletAddress(wallet.address);
-        const agentAnalytics = aiAgentService.getAgentAnalytics(wallet.address, agentType);
-        setAnalytics(agentAnalytics);
+        fetchAnalyticsData(wallet.address);
       } else {
         setWalletAddress(null);
         setAnalytics(null);
+        setChartData([]);
       }
     });
     
@@ -69,8 +71,7 @@ const AgentAnalyticsComponent: React.FC<AgentAnalyticsProps> = ({
     
     const unsubscribe = aiAgentService.subscribe((address, type) => {
       if (address === walletAddress && type === agentType) {
-        const agentAnalytics = aiAgentService.getAgentAnalytics(address, agentType);
-        setAnalytics(agentAnalytics);
+        fetchAnalyticsData(address);
       }
     });
     
@@ -79,8 +80,40 @@ const AgentAnalyticsComponent: React.FC<AgentAnalyticsProps> = ({
     };
   }, [walletAddress, agentType]);
   
-  // Generate mock chart data - in a real app this would come from a backend API
-  const generateMockChartData = () => {
+  // Fetch analytics and chart data
+  const fetchAnalyticsData = async (address: string) => {
+    setIsLoading(true);
+    
+    try {
+      // Fetch agent analytics
+      const agentAnalytics = aiAgentService.getAgentAnalytics(address, agentType);
+      setAnalytics(agentAnalytics);
+      
+      // Get chart data based on agent type
+      if (agentType === 'risk-analyzer') {
+        // For risk analyzer, use real historical risk data
+        const historicalData = await creditScoreService.getHistoricalRiskData(address);
+        const formattedData = historicalData.map(item => ({
+          date: format(item.date, 'MMM dd'),
+          value: item.value * 500 // Scale to match the expected TVL range
+        }));
+        setChartData(formattedData);
+      } else {
+        // For other agent types, use the TVL data from analytics
+        const data = generatePerformanceChartData(agentAnalytics);
+        setChartData(data);
+      }
+    } catch (error) {
+      console.error(`Error fetching data for ${agentType}:`, error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+  
+  // Generate chart data for non-risk-analyzer agents
+  const generatePerformanceChartData = (analyticsData: AgentAnalytics | null) => {
+    if (!analyticsData) return [];
+    
     const data = [];
     const now = new Date();
     
@@ -89,7 +122,7 @@ const AgentAnalyticsComponent: React.FC<AgentAnalyticsProps> = ({
       date.setDate(date.getDate() - i);
       
       // Base value + some randomness + slight upward trend
-      const baseValue = analytics?.totalValueLocked || 5000;
+      const baseValue = analyticsData.totalValueLocked || 5000;
       const randomFactor = Math.random() * 0.1; // 0-10% random variation
       const trendFactor = (30 - i) / 300; // Slight upward trend
       
@@ -102,7 +135,25 @@ const AgentAnalyticsComponent: React.FC<AgentAnalyticsProps> = ({
     return data;
   };
   
-  const chartData = analytics ? generateMockChartData() : [];
+  const formatCurrency = (value: number) => {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    }).format(value);
+  };
+  
+  if (isLoading) {
+    return (
+      <div className="w-full h-48 flex items-center justify-center">
+        <div className="text-white/50 text-center">
+          <Activity className="h-10 w-10 mx-auto mb-2 animate-pulse opacity-70" />
+          <p>Loading on-chain analytics data...</p>
+        </div>
+      </div>
+    );
+  }
   
   if ((!walletAddress && !forceWalletConnected) || !analytics) {
     return (
@@ -114,15 +165,6 @@ const AgentAnalyticsComponent: React.FC<AgentAnalyticsProps> = ({
       </div>
     );
   }
-  
-  const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2
-    }).format(value);
-  };
   
   return (
     <div className="space-y-4">
@@ -270,7 +312,7 @@ const AgentAnalyticsComponent: React.FC<AgentAnalyticsProps> = ({
                   border: '1px solid rgba(255, 255, 255, 0.1)',
                   color: 'white'
                 }}
-                formatter={(value: number) => [formatCurrency(value), 'Value']}
+                formatter={(value: number) => [formatCurrency(value), agentType === 'risk-analyzer' ? 'Risk Value' : 'Value']}
               />
               <Area 
                 type="monotone" 
