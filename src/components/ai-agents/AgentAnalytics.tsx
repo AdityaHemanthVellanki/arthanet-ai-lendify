@@ -28,9 +28,13 @@ import walletService from '@/services/walletService';
 
 interface AgentAnalyticsProps {
   agentType: AgentType;
+  forceWalletConnected?: boolean; // Added this prop to fix the type error
 }
 
-const AgentAnalyticsComponent: React.FC<AgentAnalyticsProps> = ({ agentType }) => {
+const AgentAnalyticsComponent: React.FC<AgentAnalyticsProps> = ({ 
+  agentType,
+  forceWalletConnected = false // Added default value
+}) => {
   const [walletAddress, setWalletAddress] = useState<string | null>(null);
   const [analytics, setAnalytics] = useState<AgentAnalytics | null>(null);
   
@@ -100,7 +104,7 @@ const AgentAnalyticsComponent: React.FC<AgentAnalyticsProps> = ({ agentType }) =
   
   const chartData = analytics ? generateMockChartData() : [];
   
-  if (!walletAddress || !analytics) {
+  if ((!walletAddress && !forceWalletConnected) || !analytics) {
     return (
       <div className="w-full h-48 flex items-center justify-center">
         <div className="text-white/50 text-center">

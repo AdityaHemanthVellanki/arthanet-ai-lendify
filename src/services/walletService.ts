@@ -1,4 +1,3 @@
-
 import { toast } from 'sonner';
 import { ethers } from 'ethers';
 
@@ -194,7 +193,13 @@ class WalletService {
       const provider = this.getProvider();
       if (!provider) return null;
       
-      return await provider.getSigner();
+      // Use the correct method for BrowserProvider
+      if (provider instanceof ethers.BrowserProvider) {
+        return await provider.getSigner();
+      }
+      
+      console.error('Provider is not a BrowserProvider, cannot get signer');
+      return null;
     } catch (error) {
       console.error('Error getting signer:', error);
       return null;
