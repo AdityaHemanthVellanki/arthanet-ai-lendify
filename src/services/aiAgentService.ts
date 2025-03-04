@@ -738,7 +738,7 @@ class AIAgentService {
       const contractAddress = CONTRACT_ADDRESSES[agentType];
       const transactions: TransactionRecord[] = [];
       
-      // Instead of using getHistory (which doesn't exist), use proper ethers methods
+      // Fixed: Use provider.getLogs instead of getHistory (which doesn't exist)
       // Get transactions sent from the wallet
       const filter = {
         fromBlock,
@@ -788,13 +788,16 @@ class AIAgentService {
             const txBlock = await provider.getBlock(event.blockNumber);
             
             if (txBlock) {
-              // Use proper event interface - Fix for event.args access
-              const eventData = event as unknown as ethers.EventLog;
+              // Fixed: Properly handle arguments by checking if it's an EventLog
               let amount = "0";
               
-              // Safely extract amount if it exists
-              if (eventData.args && eventData.args.length > 1) {
-                amount = eventData.args[1]?.toString() || "0";
+              if ('args' in event) {
+                // It's an EventLog with args
+                const eventLog = event as ethers.EventLog;
+                // Safely extract amount if it exists
+                if (eventLog.args && eventLog.args.length > 1) {
+                  amount = eventLog.args[1]?.toString() || "0";
+                }
               }
               
               transactions.push({
@@ -816,13 +819,16 @@ class AIAgentService {
             const txBlock = await provider.getBlock(event.blockNumber);
             
             if (txBlock) {
-              // Use proper event interface - Fix for event.args access
-              const eventData = event as unknown as ethers.EventLog;
+              // Fixed: Properly handle arguments by checking if it's an EventLog
               let amount = "0";
               
-              // Safely extract amount if it exists
-              if (eventData.args && eventData.args.length > 1) {
-                amount = eventData.args[1]?.toString() || "0";
+              if ('args' in event) {
+                // It's an EventLog with args
+                const eventLog = event as ethers.EventLog;
+                // Safely extract amount if it exists
+                if (eventLog.args && eventLog.args.length > 1) {
+                  amount = eventLog.args[1]?.toString() || "0";
+                }
               }
               
               transactions.push({

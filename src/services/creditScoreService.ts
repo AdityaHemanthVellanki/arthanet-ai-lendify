@@ -1,4 +1,3 @@
-
 import { ethers } from 'ethers';
 import { toast } from 'sonner';
 import walletService, { WalletInfo } from './walletService';
@@ -80,7 +79,7 @@ class CreditScoreService {
         throw new Error('Failed to initialize contract');
       }
       
-      // Fix: Call generateCreditScore using the contract interface properly
+      // Fixed: Call the contract method properly using proper ethers.js v6 syntax
       const tx = await contractWithSigner.generateCreditScore(walletAddress);
       
       // Show transaction submitted toast
