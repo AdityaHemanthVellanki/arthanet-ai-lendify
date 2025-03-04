@@ -1,3 +1,4 @@
+
 import { toast } from 'sonner';
 import { ethers } from 'ethers';
 import walletService, { WalletInfo } from './walletService';
@@ -109,7 +110,8 @@ class CreditScoreService {
       const defiPositions = await this.getDefiPositions(walletInfo.address);
       const txCount = await this.provider.getTransactionCount(walletInfo.address);
 
-      const creditScoreData = this.calculateScore(
+      // Here's the fix - we must await the result of calculateScore
+      const creditScoreData = await this.calculateScore(
         walletInfo.address,
         walletAge,
         tokenBalances,
