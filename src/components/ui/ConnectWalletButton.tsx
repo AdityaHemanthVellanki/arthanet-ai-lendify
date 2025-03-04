@@ -1,9 +1,7 @@
-
 import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Wallet, ChevronDown, LogOut, Copy, ExternalLink } from 'lucide-react';
 import { toast } from 'sonner';
-import { useNavigate } from 'react-router-dom';
 import walletService, { WalletInfo } from '@/services/walletService';
 import creditScoreService from '@/services/creditScoreService';
 import {
@@ -17,16 +15,14 @@ import {
 const ConnectWalletButton = () => {
   const [isConnecting, setIsConnecting] = useState(false);
   const [walletInfo, setWalletInfo] = useState<WalletInfo | null>(null);
-  const navigate = useNavigate();
 
   useEffect(() => {
     const unsubscribe = walletService.subscribe((wallet) => {
       setWalletInfo(wallet);
       
-      // Only navigate to credit score page when wallet is connected
-      // and only if this is due to a new connection (not on initial load)
+      // Only generate credit score when wallet is connected
+      // but don't navigate to credit score page automatically
       if (wallet && isConnecting) {
-        navigate('/credit-score');
         // Start generating credit score
         creditScoreService.generateCreditScore(wallet);
         setIsConnecting(false);
@@ -42,7 +38,7 @@ const ConnectWalletButton = () => {
     return () => {
       unsubscribe();
     };
-  }, [navigate, isConnecting]);
+  }, [isConnecting]);
 
   const handleConnect = async () => {
     setIsConnecting(true);

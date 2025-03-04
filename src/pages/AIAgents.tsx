@@ -1,4 +1,3 @@
-
 import React, { useEffect, useState } from 'react';
 import { useNavigate, Routes, Route, Link, Outlet } from 'react-router-dom';
 import Navbar from '@/components/layout/Navbar';
@@ -21,6 +20,11 @@ const AgentsHome = () => {
   useEffect(() => {
     window.scrollTo(0, 0);
     
+    // Check if wallet is already connected first
+    const currentWallet = walletService.getCurrentWallet();
+    setIsWalletConnected(!!currentWallet);
+    
+    // Then subscribe to future changes
     const unsubscribe = walletService.subscribe((wallet) => {
       setIsWalletConnected(!!wallet);
     });
