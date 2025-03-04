@@ -199,24 +199,26 @@ class CreditScoreService {
     return positions;
   }
 
-  private calculateScore(
+  private async calculateScore(
     address: string,
     walletAge: number,
     tokenBalances: Record<string, number>,
     defiPositions: any,
     txCount: number
-  ): CreditScoreData {
+  ): Promise<CreditScoreData> {
+    const ethPrice = await walletService.getEthPrice();
+    
     const ageActivityScore = Math.min(
       100,
       (walletAge * 5) + (txCount / 10)
     );
     
     const totalBalance = 
-      (tokenBalances.ETH * 1800) +
+      (tokenBalances.ETH * ethPrice) +
       (tokenBalances.USDC || 0) +
       (tokenBalances.USDT || 0) +
       (tokenBalances.DAI || 0) +
-      (tokenBalances.WETH * 1800 || 0);
+      (tokenBalances.WETH * ethPrice || 0);
     
     const balanceScore = Math.min(100, totalBalance / 100);
     
@@ -244,7 +246,7 @@ class CreditScoreService {
       }
     }
     
-    const riskScore = this.calculateRiskScore(tokenBalances, defiPositions);
+    const riskScore = await this.calculateRiskScore(tokenBalances, defiPositions);
     
     const aggregateScore = 
       (ageActivityScore * 0.25) +
@@ -322,18 +324,20 @@ class CreditScoreService {
     };
   }
 
-  private calculateRiskScore(
+  private async calculateRiskScore(
     tokenBalances: Record<string, number>,
     defiPositions: any
-  ): number {
+  ): Promise<number> {
     let riskScore = 50;
     
+    const ethPrice = await walletService.getEthPrice();
+    
     const totalValue = 
-      (tokenBalances.ETH * 1800) +
+      (tokenBalances.ETH * ethPrice) +
       (tokenBalances.USDC || 0) +
       (tokenBalances.USDT || 0) +
       (tokenBalances.DAI || 0) +
-      (tokenBalances.WETH * 1800 || 0);
+      (tokenBalances.WETH * ethPrice || 0);
     
     const stablecoinValue = 
       (tokenBalances.USDC || 0) +

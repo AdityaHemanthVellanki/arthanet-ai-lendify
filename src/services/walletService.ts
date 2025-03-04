@@ -13,6 +13,8 @@ class WalletService {
   private listeners: ((wallet: WalletInfo | null) => void)[] = [];
   private provider: ethers.Provider | null = null;
   private reconnecting: boolean = false;
+  private cachedEthPrice: number | null = null;
+  private lastPriceUpdate: number = 0;
 
   constructor() {
     this.initProvider();
@@ -179,7 +181,28 @@ class WalletService {
     return this.currentWallet;
   }
 
-  // Get ethereum provider
+  public async getEthPrice(): Promise<number> {
+    const now = Date.now();
+    if (this.cachedEthPrice && (now - this.lastPriceUpdate < 5 * 60 * 1000)) {
+      return this.cachedEthPrice;
+    }
+
+    try {
+      const response = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd');
+      const data = await response.json();
+      
+      if (data && data.ethereum && data.ethereum.usd) {
+        this.cachedEthPrice = data.ethereum.usd;
+        this.lastPriceUpdate = now;
+        return this.cachedEthPrice;
+      }
+      throw new Error('Invalid price data from API');
+    } catch (error) {
+      console.error('Error fetching ETH price:', error);
+      return this.cachedEthPrice || 1800;
+    }
+  }
+
   public getProvider(): ethers.Provider | null {
     if (!this.provider && window.ethereum) {
       this.provider = new ethers.BrowserProvider(window.ethereum);
@@ -187,13 +210,11 @@ class WalletService {
     return this.provider;
   }
 
-  // Get ethereum signer
   public async getSigner(): Promise<ethers.Signer | null> {
     try {
       const provider = this.getProvider();
       if (!provider) return null;
       
-      // Use the correct method for BrowserProvider
       if (provider instanceof ethers.BrowserProvider) {
         return await provider.getSigner();
       }
@@ -206,7 +227,6 @@ class WalletService {
     }
   }
 
-  // Send transaction with proper error handling
   public async sendTransaction(tx: any): Promise<ethers.TransactionResponse | null> {
     try {
       const signer = await this.getSigner();
@@ -217,7 +237,6 @@ class WalletService {
       
       const txResponse = await signer.sendTransaction(tx);
       
-      // Show transaction sent toast
       toast.info('Transaction sent', {
         description: `Transaction hash: ${txResponse.hash.substring(0, 10)}...`,
         action: {
@@ -226,10 +245,9 @@ class WalletService {
             const chainId = this.currentWallet?.chainId;
             let explorerUrl = `https://etherscan.io/tx/${txResponse.hash}`;
             
-            // Adjust explorer URL based on chain
-            if (chainId === '0x5') { // Goerli
+            if (chainId === '0x5') {
               explorerUrl = `https://goerli.etherscan.io/tx/${txResponse.hash}`;
-            } else if (chainId === '0xaa36a7') { // Sepolia
+            } else if (chainId === '0xaa36a7') {
               explorerUrl = `https://sepolia.etherscan.io/tx/${txResponse.hash}`;
             }
             
@@ -254,7 +272,6 @@ class WalletService {
 
   public subscribe(listener: (wallet: WalletInfo | null) => void): () => void {
     this.listeners.push(listener);
-    // Return unsubscribe function
     return () => {
       this.listeners = this.listeners.filter(l => l !== listener);
     };
@@ -275,13 +292,11 @@ class WalletService {
   }
 }
 
-// Add Ethereum provider to Window interface
 declare global {
   interface Window {
     ethereum?: any;
   }
 }
 
-// Singleton instance
 export const walletService = new WalletService();
 export default walletService;
