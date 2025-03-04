@@ -63,25 +63,17 @@ class CreditScoreService {
         return null;
       }
       
-      // Get the contract instance
-      const provider = walletService.getProvider();
-      if (!provider) {
-        throw new Error('No provider available');
-      }
-      
-      const contract = new ethers.Contract(
+      // Get the contract with signer for transaction signing
+      const contractWithSigner = await walletService.getContractWithSigner(
         CREDIT_SCORE_CONTRACT_ADDRESS,
-        CreditScoreABI,
-        provider
+        CreditScoreABI
       );
       
-      // Call the generate credit score function
-      const signer = walletService.getSigner();
-      if (!signer) {
-        throw new Error('No signer available');
+      if (!contractWithSigner) {
+        throw new Error('Failed to initialize contract');
       }
       
-      const contractWithSigner = contract.connect(signer);
+      // Call the generate credit score function from the ABI
       const tx = await contractWithSigner.generateCreditScore(walletAddress);
       
       // Show transaction submitted toast
@@ -130,16 +122,15 @@ class CreditScoreService {
   
   // Fetch credit score data from blockchain
   private async fetchCreditScoreFromBlockchain(walletAddress: string): Promise<CreditScoreData> {
-    const provider = walletService.getProvider();
-    if (!provider) {
-      throw new Error('No provider available');
-    }
-    
-    const contract = new ethers.Contract(
+    // Get contract instance
+    const contract = await walletService.getContract(
       CREDIT_SCORE_CONTRACT_ADDRESS,
-      CreditScoreABI,
-      provider
+      CreditScoreABI
     );
+    
+    if (!contract) {
+      throw new Error('Failed to initialize contract');
+    }
     
     // Fetch basic score data
     const scoreDetails = await contract.getCreditScoreDetails(walletAddress);
@@ -179,3 +170,4 @@ class CreditScoreService {
 
 const creditScoreService = new CreditScoreService();
 export default creditScoreService;
+
