@@ -1,10 +1,12 @@
 
 import React from 'react';
-import { Progress as BaseProgress, ProgressProps as BaseProgressProps } from "@/components/ui/progress";
+import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
+import * as ProgressPrimitive from "@radix-ui/react-progress";
 
-export interface ProgressWithIndicatorProps extends BaseProgressProps {
+export interface ProgressWithIndicatorProps extends React.ComponentPropsWithoutRef<typeof ProgressPrimitive.Root> {
   indicatorClassName?: string;
+  value?: number;
 }
 
 const ProgressWithIndicator = React.forwardRef<
@@ -12,7 +14,7 @@ const ProgressWithIndicator = React.forwardRef<
   ProgressWithIndicatorProps
 >(({ value, className, indicatorClassName, ...props }, ref) => {
   return (
-    <BaseProgress
+    <Progress
       ref={ref}
       value={value}
       className={className}
@@ -22,7 +24,7 @@ const ProgressWithIndicator = React.forwardRef<
         className={cn("h-full bg-primary", indicatorClassName)} 
         style={{ width: `${value}%` }}
       />
-    </BaseProgress>
+    </Progress>
   );
 });
 
