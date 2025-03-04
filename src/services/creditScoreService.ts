@@ -1,3 +1,4 @@
+
 import { ethers } from 'ethers';
 import { toast } from 'sonner';
 import walletService, { WalletInfo } from './walletService';
@@ -79,8 +80,8 @@ class CreditScoreService {
         throw new Error('Failed to initialize contract');
       }
       
-      // Call the generate credit score function from the ABI - use proper method from ABI
-      const tx = await contractWithSigner.functions.generateCreditScore(walletAddress);
+      // Fix: Call generateCreditScore using the contract interface properly
+      const tx = await contractWithSigner.generateCreditScore(walletAddress);
       
       // Show transaction submitted toast
       toast.info('Credit score calculation submitted', {

@@ -738,35 +738,44 @@ class AIAgentService {
       const contractAddress = CONTRACT_ADDRESSES[agentType];
       const transactions: TransactionRecord[] = [];
       
-      // Get contract transaction history
-      // This could be replaced with more specific event filtering in a production environment
-      // For now, we'll look for any transactions between the wallet and contract
+      // Instead of using getHistory (which doesn't exist), use proper ethers methods
+      // Get transactions sent from the wallet
+      const filter = {
+        fromBlock,
+        toBlock,
+        address: contractAddress,
+      };
       
-      // First, check for transactions from wallet to contract
-      const sentTxs = await provider.getHistory(walletAddress, fromBlock, toBlock);
+      // Get logs involving this contract
+      const logs = await provider.getLogs(filter);
       
-      for (const tx of sentTxs) {
-        if (tx.to && tx.to.toLowerCase() === contractAddress.toLowerCase()) {
-          // Get transaction details and receipt
-          const txReceipt = await provider.getTransactionReceipt(tx.hash);
-          const txBlock = await provider.getBlock(tx.blockNumber);
-          
-          if (txBlock && txReceipt) {
-            // Add to our transactions list
-            transactions.push({
-              hash: tx.hash,
-              timestamp: Number(txBlock.timestamp),
-              blockNumber: tx.blockNumber,
-              amount: tx.value.toString(),
-              direction: 'out',
-              action: 'Deposit' // Simplified; in a real implementation would determine from method signature
-            });
+      // Process logs to find transactions from this wallet to the contract
+      for (const log of logs) {
+        try {
+          // Get transaction details
+          const tx = await provider.getTransaction(log.transactionHash);
+          if (tx && tx.from && tx.from.toLowerCase() === walletAddress.toLowerCase()) {
+            const txReceipt = await provider.getTransactionReceipt(log.transactionHash);
+            const txBlock = await provider.getBlock(log.blockNumber);
+            
+            if (txBlock && txReceipt) {
+              // Add to our transactions list
+              transactions.push({
+                hash: log.transactionHash,
+                timestamp: Number(txBlock.timestamp),
+                blockNumber: log.blockNumber,
+                amount: tx.value.toString(),
+                direction: 'out',
+                action: 'Interaction' // Simplified; in a real implementation would determine from method signature
+              });
+            }
           }
+        } catch (err) {
+          console.error("Error processing transaction log:", err);
         }
       }
       
       // Check for contract events involving this wallet
-      // This would fetch events like withdrawals, interest payments, etc.
       const contract = await walletService.getContract(contractAddress, this.agentABIs[agentType]);
       
       if (contract) {
@@ -779,11 +788,20 @@ class AIAgentService {
             const txBlock = await provider.getBlock(event.blockNumber);
             
             if (txBlock) {
+              // Use proper event interface - Fix for event.args access
+              const eventData = event as unknown as ethers.EventLog;
+              let amount = "0";
+              
+              // Safely extract amount if it exists
+              if (eventData.args && eventData.args.length > 1) {
+                amount = eventData.args[1]?.toString() || "0";
+              }
+              
               transactions.push({
                 hash: event.transactionHash,
                 timestamp: Number(txBlock.timestamp),
                 blockNumber: event.blockNumber,
-                amount: event.args.amount.toString(),
+                amount: amount,
                 direction: 'in',
                 action: 'Withdrawal'
               });
@@ -798,11 +816,20 @@ class AIAgentService {
             const txBlock = await provider.getBlock(event.blockNumber);
             
             if (txBlock) {
+              // Use proper event interface - Fix for event.args access
+              const eventData = event as unknown as ethers.EventLog;
+              let amount = "0";
+              
+              // Safely extract amount if it exists
+              if (eventData.args && eventData.args.length > 1) {
+                amount = eventData.args[1]?.toString() || "0";
+              }
+              
               transactions.push({
                 hash: event.transactionHash,
                 timestamp: Number(txBlock.timestamp),
                 blockNumber: event.blockNumber,
-                amount: event.args.amount.toString(),
+                amount: amount,
                 direction: 'out',
                 action: 'Deposit'
               });
