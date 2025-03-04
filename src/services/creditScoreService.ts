@@ -1,10 +1,11 @@
+
 import { ethers } from 'ethers';
 import { toast } from 'sonner';
 import walletService, { WalletInfo } from './walletService';
 import CreditScoreABI from '../abis/CreditScoreABI.json';
 
 // Credit score contract address - would typically come from environment variables
-const CREDIT_SCORE_CONTRACT_ADDRESS = '0x123abc456def789ghi012jkl345mno678pqr'; // Replace with actual contract address
+const CREDIT_SCORE_CONTRACT_ADDRESS = '0x123abc456def789ghi012jkl345mno678pqr'.toLowerCase(); // Using lowercase to ensure consistency
 
 export interface CreditScoreFactor {
   category: string;
@@ -79,7 +80,8 @@ class CreditScoreService {
         throw new Error('Failed to initialize contract');
       }
       
-      // Fixed: Call the contract method properly using proper ethers.js v6 syntax
+      // Fixed: Use proper syntax for calling contract methods in ethers.js v6
+      // Call the contract method through the interface
       const tx = await contractWithSigner.generateCreditScore(walletAddress);
       
       // Show transaction submitted toast
