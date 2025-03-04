@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Wallet, ChevronDown, LogOut, Copy, ExternalLink } from 'lucide-react';
@@ -22,15 +23,17 @@ const ConnectWalletButton = () => {
     const unsubscribe = walletService.subscribe((wallet) => {
       setWalletInfo(wallet);
       
-      // If wallet is connected, navigate to credit score page and start generating score
-      if (wallet) {
+      // Only navigate to credit score page when wallet is connected
+      // and only if this is due to a new connection (not on initial load)
+      if (wallet && isConnecting) {
         navigate('/credit-score');
         // Start generating credit score
         creditScoreService.generateCreditScore(wallet);
+        setIsConnecting(false);
       }
     });
 
-    // Check if wallet is already connected
+    // Check if wallet is already connected, but don't navigate
     const currentWallet = walletService.getCurrentWallet();
     if (currentWallet) {
       setWalletInfo(currentWallet);
@@ -39,7 +42,7 @@ const ConnectWalletButton = () => {
     return () => {
       unsubscribe();
     };
-  }, [navigate]);
+  }, [navigate, isConnecting]);
 
   const handleConnect = async () => {
     setIsConnecting(true);
@@ -49,7 +52,6 @@ const ConnectWalletButton = () => {
       await walletService.connectWallet('MetaMask');
     } catch (error) {
       console.error('Failed to connect wallet:', error);
-    } finally {
       setIsConnecting(false);
     }
   };

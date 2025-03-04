@@ -35,6 +35,16 @@ const CreditScore = () => {
       }
     });
 
+    // Check if wallet is already connected, if so, try to get cached score
+    const currentWallet = walletService.getCurrentWallet();
+    if (currentWallet) {
+      setWalletInfo(currentWallet);
+      const cachedScore = creditScoreService.getCachedCreditScore(currentWallet.address);
+      if (cachedScore) {
+        setCreditScore(cachedScore);
+      }
+    }
+
     return () => {
       unsubscribe();
     };
