@@ -26,9 +26,11 @@ const ConnectWalletButton = () => {
       // but don't navigate to credit score page automatically
       if (wallet && isConnecting) {
         console.log("Wallet connected, generating credit score");
-        // Start generating credit score
-        creditScoreService.generateCreditScore(wallet);
-        setIsConnecting(false);
+        // Start generating credit score with a small delay to allow UI to update
+        setTimeout(() => {
+          creditScoreService.generateCreditScore(wallet);
+          setIsConnecting(false);
+        }, 500);
       }
     });
 
@@ -54,12 +56,16 @@ const ConnectWalletButton = () => {
     } catch (error) {
       console.error('Failed to connect wallet:', error);
       setIsConnecting(false);
+      toast.error('Failed to connect wallet', {
+        description: error instanceof Error ? error.message : 'Unknown error occurred'
+      });
     }
   };
 
   const handleDisconnect = () => {
     console.log("Disconnecting wallet");
     walletService.disconnectWallet();
+    toast.success('Wallet disconnected');
   };
 
   const handleRefreshBalance = async () => {
