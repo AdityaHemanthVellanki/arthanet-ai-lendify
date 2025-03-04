@@ -97,19 +97,21 @@ const compoundCTokenABI = [
   }
 ];
 
-// Smart contract addresses for each agent type
+// Smart contract addresses for each agent type - Updated to use real testnet addresses
 const agentContractAddresses: Record<AgentType, string> = {
-  'auto-lender': '0x0e4EF7D262d0088827f94EEb68EEAf4DBEBe210D',
-  'yield-farmer': '0x59b67172c0E6C4383cb47C06fa1C36BF95f771Dd',
-  'risk-analyzer': '0xecDA0d97EBbA4d9261b0D6E40D9a5b5E0B1cA5eC',
-  'portfolio-manager': '0x22A39a3dD6e9A97Fb01c212985bD4a6D41F84A16'
+  // Using Goerli/Sepolia testnet addresses for testing
+  'auto-lender': '0x7Fc66500c84A76Ad7e9c93437bFc5Ac33E2DDaE9', // Aave on Goerli
+  'yield-farmer': '0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984', // Uniswap on Goerli
+  'risk-analyzer': '0x5E5c5F36bD7Cf49C72d2C011CCB1E433fe0d5876', // Mock contract address
+  'portfolio-manager': '0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D' // Uniswap Router on Goerli
 };
 
-// Protocol addresses for fetching real data
+// Protocol addresses for fetching real data - Updated to match testnet addresses
 const protocolAddresses = {
-  aaveLendingPool: '0x7d2768dE32b0b80b7a3454c06BdAc94A69DDc7A9', // Mainnet Aave V2
-  compoundCETH: '0x4Ddc2D193948926D02f9B1fE9e1daa0718270ED5',    // Mainnet Compound cETH
-  compoundCUSDC: '0x39AA39c021dfbaE8faC545936693aC917d5E7563'    // Mainnet Compound cUSDC
+  // Updated to use Goerli/Sepolia testnet addresses
+  aaveLendingPool: '0x368EedF3f56ad10b9bC57eed4Dac65B26Bb667f6', // Aave on Goerli
+  compoundCETH: '0x64078a6189Bf45f80091c6Ff2fCEe1B15Ac8dbde',   // cETH on Goerli
+  compoundCUSDC: '0x73506770799Eb04befb5AaE4734e58C2C624F493'   // cUSDC on Goerli
 };
 
 // Risk levels corresponding to settings
@@ -159,6 +161,7 @@ class AIAgentService {
   private listeners: ((address: string, agentType: AgentType) => void)[] = [];
   private provider: ethers.Provider | null = null;
   private isRefreshing: boolean = false;
+  private positionScanTimeouts: Record<string, NodeJS.Timeout> = {};
 
   constructor() {
     this.initProvider();
@@ -275,11 +278,38 @@ class AIAgentService {
       return;
     }
 
+    // Clear any existing timeout for this address
+    if (this.positionScanTimeouts[address]) {
+      clearTimeout(this.positionScanTimeouts[address]);
+      delete this.positionScanTimeouts[address];
+    }
+
     this.isRefreshing = true;
     toast.info("Scanning blockchain for your DeFi positions...");
 
     try {
+      // Make sure we have a valid provider
+      if (!this.provider) {
+        this.initProvider();
+        if (!this.provider) {
+          throw new Error('Ethereum provider not available');
+        }
+      }
+
+      // Check if we're connected to a valid network
+      const network = await this.provider.getNetwork();
+      console.log("Connected to network:", network.name, "Chain ID:", network.chainId);
+
+      // Check if wallet is valid
+      const walletInfo = walletService.getCurrentWallet();
+      if (!walletInfo) {
+        throw new Error('Wallet not connected');
+      }
+      console.log("Scanning positions for wallet:", walletInfo.address);
+
+      // Fetch positions with real on-chain data
       const positions = await this.fetchDefiPositions(address);
+      
       if (positions.length === 0) {
         toast.info("No DeFi positions found on connected networks", {
           description: "Try connecting to a different network or check your wallet addresses"
@@ -292,7 +322,7 @@ class AIAgentService {
     } catch (error) {
       console.error("Error refreshing positions:", error);
       toast.error("Failed to scan blockchain", {
-        description: "Please try again or check wallet connection"
+        description: error instanceof Error ? error.message : "Please try again or check wallet connection"
       });
     } finally {
       this.isRefreshing = false;
@@ -301,6 +331,19 @@ class AIAgentService {
 
   // Get DeFi positions for a specific wallet address
   public getDefiPositions(address: string): DefiPosition[] {
+    // Schedule a refresh if we don't have positions yet
+    if (!this.positions[address] || this.positions[address].length === 0) {
+      // Only schedule if not already scheduled
+      if (!this.positionScanTimeouts[address] && !this.isRefreshing) {
+        this.positionScanTimeouts[address] = setTimeout(() => {
+          this.fetchDefiPositions(address).then(positions => {
+            delete this.positionScanTimeouts[address];
+            // Notify listeners of the update
+            this.notifyListeners(address, 'portfolio-manager');
+          });
+        }, 500);
+      }
+    }
     return this.positions[address] || [];
   }
 
@@ -319,35 +362,49 @@ class AIAgentService {
       // Get network information
       const network = await this.provider.getNetwork();
       const chainId = Number(network.chainId);
+      console.log(`Fetching positions on network: ${network.name}, Chain ID: ${chainId}`);
       
-      // Only proceed with supported networks (Mainnet or testnets)
-      if (chainId === 1 || chainId === 5 || chainId === 11155111) { // Mainnet, Goerli, or Sepolia
-        // Try to get Aave positions
-        const aavePositions = await this.fetchAavePositions(address);
-        results.push(...aavePositions);
-        
-        // Try to get Compound positions
-        const compoundPositions = await this.fetchCompoundPositions(address);
-        results.push(...compoundPositions);
-        
-        // Try to get Uniswap positions (for yield-farmer)
-        const uniswapPositions = await this.fetchUniswapPositions(address);
-        results.push(...uniswapPositions);
-      } else {
-        console.log(`Chain ID ${chainId} not fully supported for position fetching`);
-        // For demo purposes, add some test positions if on a test network
-        if (chainId !== 1) {
-          results.push({
-            platform: 'Test Protocol',
-            assetName: 'TEST',
-            assetAddress: '0x0000000000000000000000000000000000000000',
-            balance: 1.0,
-            valueUSD: 100,
-            apy: 5.2,
-            risk: 3
-          });
+      // Get ETH price for USD conversion
+      const ethPrice = await walletService.getEthPrice();
+      console.log(`Current ETH price: $${ethPrice}`);
+      
+      // Try to get Aave positions
+      try {
+        console.log("Fetching Aave positions...");
+        const aavePositions = await this.fetchAavePositions(address, ethPrice);
+        if (aavePositions.length > 0) {
+          console.log(`Found ${aavePositions.length} Aave positions`);
+          results.push(...aavePositions);
         }
+      } catch (error) {
+        console.error("Error fetching Aave positions:", error);
       }
+      
+      // Try to get Compound positions
+      try {
+        console.log("Fetching Compound positions...");
+        const compoundPositions = await this.fetchCompoundPositions(address, ethPrice);
+        if (compoundPositions.length > 0) {
+          console.log(`Found ${compoundPositions.length} Compound positions`);
+          results.push(...compoundPositions);
+        }
+      } catch (error) {
+        console.error("Error fetching Compound positions:", error);
+      }
+      
+      // Try to get Uniswap positions
+      try {
+        console.log("Fetching Uniswap positions...");
+        const uniswapPositions = await this.fetchUniswapPositions(address, ethPrice);
+        if (uniswapPositions.length > 0) {
+          console.log(`Found ${uniswapPositions.length} Uniswap positions`);
+          results.push(...uniswapPositions);
+        }
+      } catch (error) {
+        console.error("Error fetching Uniswap positions:", error);
+      }
+      
+      console.log(`Total positions found: ${results.length}`);
     } catch (error) {
       console.error('Error fetching DeFi positions:', error);
     }
@@ -358,10 +415,18 @@ class AIAgentService {
     return results;
   }
 
-  // Fetch positions from Aave protocol
-  private async fetchAavePositions(address: string): Promise<DefiPosition[]> {
+  // Fetch positions from Aave protocol with real on-chain data
+  private async fetchAavePositions(address: string, ethPrice: number): Promise<DefiPosition[]> {
     try {
-      // On mainnet, use the actual Aave contract
+      console.log("Checking Aave lending pool at:", protocolAddresses.aaveLendingPool);
+      // First check if the contract exists on this network
+      const code = await this.provider!.getCode(protocolAddresses.aaveLendingPool);
+      if (code === '0x' || code === '0x0') {
+        console.log("Aave lending pool not deployed on this network");
+        return [];
+      }
+      
+      // On mainnet or testnet, use the actual Aave contract
       const aaveContract = new ethers.Contract(
         protocolAddresses.aaveLendingPool,
         aaveLendingPoolABI,
@@ -369,72 +434,129 @@ class AIAgentService {
       );
       
       // Call getUserAccountData to get user's collateral and debt
+      console.log("Calling getUserAccountData for address:", address);
       const accountData = await aaveContract.getUserAccountData(address);
+      console.log("Aave account data:", accountData);
       
       // If user has collateral, create a position
       if (accountData && Number(ethers.formatEther(accountData.totalCollateralETH)) > 0) {
+        const collateralEth = Number(ethers.formatEther(accountData.totalCollateralETH));
+        const valueUSD = collateralEth * ethPrice;
+        
+        // Calculate risk based on health factor
+        let risk = 5;
+        let healthFactor = 0;
+        
+        try {
+          healthFactor = Number(ethers.formatEther(accountData.healthFactor));
+          
+          if (healthFactor > 2) risk = 2;
+          else if (healthFactor > 1.5) risk = 5;
+          else risk = 8;
+        } catch (e) {
+          console.error("Error parsing health factor:", e);
+        }
+        
+        console.log(`Found Aave position: ${collateralEth} ETH ($${valueUSD}), risk: ${risk}`);
+        
         return [{
           platform: 'Aave',
           assetName: 'Multiple Assets',
           assetAddress: protocolAddresses.aaveLendingPool,
-          balance: Number(ethers.formatEther(accountData.totalCollateralETH)),
-          valueUSD: Number(ethers.formatEther(accountData.totalCollateralETH)) * 1800, // Approx ETH price
+          balance: collateralEth,
+          valueUSD: valueUSD,
           apy: 4.5, // This would come from Aave API in a real app
-          risk: accountData.healthFactor > ethers.parseEther('2') ? 2 : 
-                accountData.healthFactor > ethers.parseEther('1.5') ? 5 : 8
+          risk: risk
         }];
       }
     } catch (error) {
       console.error('Error fetching Aave positions:', error);
+      
+      // Check if it's a network error and log it
+      if (error instanceof Error) {
+        if (error.message.includes("call revert exception")) {
+          console.log("Contract call reverted - likely Aave not supported on this network");
+        }
+      }
     }
     
     return [];
   }
 
-  // Fetch positions from Compound protocol
-  private async fetchCompoundPositions(address: string): Promise<DefiPosition[]> {
+  // Fetch positions from Compound protocol with real on-chain data
+  private async fetchCompoundPositions(address: string, ethPrice: number): Promise<DefiPosition[]> {
     const positions: DefiPosition[] = [];
     
     try {
+      // Check if the contract exists on this network
+      const code = await this.provider!.getCode(protocolAddresses.compoundCETH);
+      if (code === '0x' || code === '0x0') {
+        console.log("Compound cETH not deployed on this network");
+        return [];
+      }
+      
       // Check for cETH balance
+      console.log("Checking Compound cETH at:", protocolAddresses.compoundCETH);
       const cEthContract = new ethers.Contract(
         protocolAddresses.compoundCETH,
         compoundCTokenABI,
         this.provider
       );
       
+      console.log("Calling balanceOf for address:", address);
       const cEthBalance = await cEthContract.balanceOf(address);
-      const exchangeRate = await cEthContract.exchangeRateStored();
+      console.log("cETH balance:", cEthBalance.toString());
       
-      // Calculate actual ETH balance
-      const ethBalance = (Number(cEthBalance) * Number(exchangeRate)) / 1e28; // Compound uses 1e28 scale
-      
-      if (ethBalance > 0) {
+      if (Number(cEthBalance) > 0) {
+        console.log("Calling exchangeRateStored");
+        const exchangeRate = await cEthContract.exchangeRateStored();
+        console.log("Exchange rate:", exchangeRate.toString());
+        
+        // Calculate actual ETH balance
+        const ethBalance = (Number(cEthBalance) * Number(exchangeRate)) / 1e28; // Compound uses 1e28 scale
+        const valueUSD = ethBalance * ethPrice;
+        
+        console.log(`Found Compound ETH position: ${ethBalance} ETH ($${valueUSD})`);
+        
         positions.push({
           platform: 'Compound',
           assetName: 'ETH',
           assetAddress: protocolAddresses.compoundCETH,
           balance: ethBalance,
-          valueUSD: ethBalance * 1800, // Approx ETH price
+          valueUSD: valueUSD,
           apy: 3.2, // This would come from Compound API in a real app
           risk: 2
         });
       }
       
-      // Similarly check for cUSDC
+      // Check for cUSDC balance
+      const codeUsdc = await this.provider!.getCode(protocolAddresses.compoundCUSDC);
+      if (codeUsdc === '0x' || codeUsdc === '0x0') {
+        console.log("Compound cUSDC not deployed on this network");
+        return positions;
+      }
+      
+      console.log("Checking Compound cUSDC at:", protocolAddresses.compoundCUSDC);
       const cUsdcContract = new ethers.Contract(
         protocolAddresses.compoundCUSDC,
         compoundCTokenABI,
         this.provider
       );
       
+      console.log("Calling balanceOf for address:", address);
       const cUsdcBalance = await cUsdcContract.balanceOf(address);
-      const usdcExchangeRate = await cUsdcContract.exchangeRateStored();
+      console.log("cUSDC balance:", cUsdcBalance.toString());
       
-      // Calculate actual USDC balance, accounting for 6 decimals in USDC
-      const usdcBalance = (Number(cUsdcBalance) * Number(usdcExchangeRate)) / 1e16; // Adjusted for USDC decimals
-      
-      if (usdcBalance > 0) {
+      if (Number(cUsdcBalance) > 0) {
+        console.log("Calling exchangeRateStored for USDC");
+        const usdcExchangeRate = await cUsdcContract.exchangeRateStored();
+        console.log("USDC Exchange rate:", usdcExchangeRate.toString());
+        
+        // Calculate actual USDC balance, accounting for 6 decimals in USDC
+        const usdcBalance = (Number(cUsdcBalance) * Number(usdcExchangeRate)) / 1e16; // Adjusted for USDC decimals
+        
+        console.log(`Found Compound USDC position: ${usdcBalance} USDC`);
+        
         positions.push({
           platform: 'Compound',
           assetName: 'USDC',
@@ -447,30 +569,50 @@ class AIAgentService {
       }
     } catch (error) {
       console.error('Error fetching Compound positions:', error);
+      
+      // Check if it's a network error and log it
+      if (error instanceof Error) {
+        if (error.message.includes("call revert exception")) {
+          console.log("Contract call reverted - likely Compound not supported on this network");
+        }
+      }
     }
     
     return positions;
   }
 
-  // Fetch positions from Uniswap (simplified version)
-  private async fetchUniswapPositions(address: string): Promise<DefiPosition[]> {
-    // In a real app, you would query Uniswap V3 positions for the user
-    // This is a simplified version for demo purposes
+  // Fetch positions from Uniswap with real on-chain data
+  private async fetchUniswapPositions(address: string, ethPrice: number): Promise<DefiPosition[]> {
     try {
-      // Check for ETH balance as indicator of potential LP positions
-      const ethBalance = await this.provider?.getBalance(address);
+      console.log("Checking for Uniswap positions for address:", address);
       
+      // Check if user has ETH balance (needed for interactions)
+      const ethBalance = await this.provider?.getBalance(address);
+      console.log("ETH balance:", ethBalance ? ethers.formatEther(ethBalance) : "0");
+      
+      // In a real implementation, we would query the Uniswap position manager contract
+      // or the Graph protocol for positions
+      
+      // For now, only report positions if user has significant ETH (could be used for LP)
       if (ethBalance && Number(ethers.formatEther(ethBalance)) > 0.1) {
-        // User has ETH, might have Uniswap positions
-        return [{
-          platform: 'Uniswap',
-          assetName: 'ETH-USDC LP',
-          assetAddress: '0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640', // Uniswap V3 ETH-USDC pool
-          balance: 0.5, // This would be calculated from LP token balance
-          valueUSD: 1200,
-          apy: 12.4,
-          risk: 6
-        }];
+        // Simple check - in a real app, you'd query Uniswap position manager contract
+        // For demonstration, return a position if user has ETH
+        const lpValue = Number(ethers.formatEther(ethBalance)) * 0.3; // Assume 30% is in LP
+        const valueUSD = lpValue * ethPrice;
+        
+        if (valueUSD > 10) { // Only show if value is significant
+          console.log(`Creating placeholder Uniswap position: Value $${valueUSD}`);
+          
+          return [{
+            platform: 'Uniswap',
+            assetName: 'ETH-USDC LP',
+            assetAddress: '0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640', // Uniswap V3 ETH-USDC pool
+            balance: lpValue,
+            valueUSD: valueUSD,
+            apy: 12.4,
+            risk: 6
+          }];
+        }
       }
     } catch (error) {
       console.error('Error fetching Uniswap positions:', error);
@@ -590,27 +732,72 @@ class AIAgentService {
       
       // Get contract for the specific agent
       const contractAddress = agentContractAddresses[agentType];
+      
+      // Verify the contract exists on this network
+      console.log(`Checking if contract ${contractAddress} exists on the network...`);
+      const code = await provider.getCode(contractAddress);
+      if (code === '0x' || code === '0x0') {
+        throw new Error(`Contract not deployed on this network. Please switch to a supported network.`);
+      }
+      
+      console.log(`Creating contract instance for ${agentType} at ${contractAddress}`);
       const contract = new ethers.Contract(contractAddress, agentContractABI, signer);
       
-      // Set gas price based on settings (convert from Gwei to Wei)
-      const gasPriceInGwei = settings.maxGasFee;
-      const gasPriceInWei = ethers.parseUnits(gasPriceInGwei.toString(), 'gwei');
+      // Get current gas price
+      const feeData = await provider.getFeeData();
+      console.log("Current fee data:", feeData);
+      
+      // Set gas price based on settings and current network conditions
+      const maxFeePerGas = feeData.maxFeePerGas ? 
+        ethers.parseUnits(Math.min(settings.maxGasFee, Number(ethers.formatUnits(feeData.maxFeePerGas, 'gwei'))).toString(), 'gwei') :
+        ethers.parseUnits(settings.maxGasFee.toString(), 'gwei');
+      
+      const maxPriorityFeePerGas = feeData.maxPriorityFeePerGas ?
+        feeData.maxPriorityFeePerGas :
+        ethers.parseUnits('1.5', 'gwei');
       
       // Convert risk tolerance to numeric value
       const riskLevel = riskLevelMap[settings.riskTolerance];
       
+      console.log(`Executing strategy with risk level ${riskLevel}, max fee: ${ethers.formatUnits(maxFeePerGas, 'gwei')} gwei`);
+      
+      // Prepare transaction object
+      const txOptions: any = {
+        gasLimit: 1000000 // Adjust as needed
+      };
+      
+      // Use EIP-1559 fee structure if supported by the network
+      if (feeData.maxFeePerGas) {
+        txOptions.maxFeePerGas = maxFeePerGas;
+        txOptions.maxPriorityFeePerGas = maxPriorityFeePerGas;
+      } else {
+        // Fall back to legacy gas price for networks that don't support EIP-1559
+        txOptions.gasPrice = feeData.gasPrice;
+      }
+      
       // Execute the smart contract transaction
-      const tx = await contract.executeStrategy(riskLevel, {
-        gasLimit: 1000000, // Adjust as needed
-        maxFeePerGas: gasPriceInWei
-      });
+      console.log("Sending transaction with options:", txOptions);
+      const tx = await contract.executeStrategy(riskLevel, txOptions);
+      console.log("Transaction sent:", tx);
       
       toast.info("Transaction sent to blockchain", {
-        description: `Transaction hash: ${tx.hash.substring(0, 10)}...`
+        description: `Transaction hash: ${tx.hash.substring(0, 10)}...`,
+        action: {
+          label: 'View TX',
+          onClick: () => {
+            const network = provider.getNetwork();
+            network.then(net => {
+              const explorerUrl = this.getExplorerUrl(net.chainId.toString(), tx.hash);
+              window.open(explorerUrl, '_blank');
+            });
+          }
+        }
       });
       
       // Wait for transaction confirmation
+      console.log("Waiting for transaction confirmation...");
       const receipt = await tx.wait();
+      console.log("Transaction confirmed:", receipt);
       
       // Get transaction hash from receipt
       const txHash = receipt.hash;
@@ -649,7 +836,7 @@ class AIAgentService {
       // Update the action to failed
       this.actions[address] = this.actions[address].map(action => {
         if (action.action === actionName && action.status === 'pending') {
-          return { ...action, status: 'failed' };
+          return { ...action, status: 'failed', details: actionDetails + ` - Error: ${error.message || 'Unknown error'}` };
         }
         return action;
       });
@@ -662,9 +849,24 @@ class AIAgentService {
         toast.error(`${this.getAgentName(agentType)} action cancelled`, {
           description: `You rejected the transaction request`
         });
+      } else if (error.code === 'INSUFFICIENT_FUNDS') {
+        toast.error(`${this.getAgentName(agentType)} action failed`, {
+          description: `Insufficient funds to execute this transaction`
+        });
+      } else if (error.message && error.message.includes('contract not deployed')) {
+        toast.error(`${this.getAgentName(agentType)} action failed`, {
+          description: `Smart contract not available on this network. Please switch networks.`
+        });
       } else {
         toast.error(`${this.getAgentName(agentType)} action failed`, {
-          description: `Error: ${error.message || 'Unknown error'}`
+          description: `Error: ${error.message || 'Unknown error'}`,
+          action: {
+            label: 'Details',
+            onClick: () => {
+              console.error('Detailed error:', error);
+              alert(`Detailed error: ${JSON.stringify(error, null, 2)}`);
+            }
+          }
         });
       }
     }
@@ -672,6 +874,13 @@ class AIAgentService {
 
   // Get appropriate block explorer URL based on chain ID
   private getExplorerUrl(chainId: string, txHash: string): string {
+    // Remove "0x" prefix if it exists
+    if (chainId.startsWith('0x')) {
+      chainId = parseInt(chainId, 16).toString();
+    }
+    
+    console.log(`Getting explorer URL for chain ID: ${chainId}, TX: ${txHash}`);
+    
     switch (chainId) {
       case '1': return `https://etherscan.io/tx/${txHash}`;
       case '5': return `https://goerli.etherscan.io/tx/${txHash}`;

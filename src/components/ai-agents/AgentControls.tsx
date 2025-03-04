@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { Play, Info, Settings } from 'lucide-react';
+import { Play, Info, Settings, AlertTriangle, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import {
@@ -23,6 +23,35 @@ const AgentControls: React.FC<AgentControlsProps> = ({ agentType, agentName }) =
   const [settings, setSettings] = useState<AgentSettings | null>(null);
   const [isExecuting, setIsExecuting] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [networkError, setNetworkError] = useState<string | null>(null);
+  
+  // Check if the current network is supported for the agent
+  useEffect(() => {
+    const checkNetworkCompatibility = async () => {
+      try {
+        if (!window.ethereum) {
+          return;
+        }
+        
+        const chainId = await window.ethereum.request({ method: 'eth_chainId' });
+        // Convert to decimal for easier comparison
+        const decimalChainId = parseInt(chainId, 16);
+        
+        // List of supported networks (varies by agent)
+        const supportedNetworks = [1, 5, 11155111]; // Mainnet, Goerli, Sepolia
+        
+        if (!supportedNetworks.includes(decimalChainId)) {
+          setNetworkError(`This agent may not work on the current network (Chain ID: ${decimalChainId}). Please switch to Ethereum Mainnet, Goerli, or Sepolia testnet.`);
+        } else {
+          setNetworkError(null);
+        }
+      } catch (error) {
+        console.error("Error checking network compatibility:", error);
+      }
+    };
+    
+    checkNetworkCompatibility();
+  }, [agentType, walletAddress]); 
   
   // Get agent settings when wallet address or agent type changes
   useEffect(() => {
@@ -93,10 +122,13 @@ const AgentControls: React.FC<AgentControlsProps> = ({ agentType, agentName }) =
     setIsExecuting(true);
     
     try {
+      console.log(`Executing ${agentType} action for wallet ${walletAddress}`);
       await aiAgentService.runAgentAction(walletAddress, agentType);
     } catch (error) {
       console.error('Error executing agent action:', error);
-      toast.error('Failed to execute agent action');
+      toast.error('Failed to execute agent action', {
+        description: error instanceof Error ? error.message : 'Unknown error occurred'
+      });
     } finally {
       setIsExecuting(false);
     }
@@ -108,6 +140,7 @@ const AgentControls: React.FC<AgentControlsProps> = ({ agentType, agentName }) =
       return;
     }
     
+    console.log(`Toggling agent ${agentType} active state to ${!settings?.isActive}`);
     aiAgentService.toggleAgentActive(walletAddress, agentType);
   };
   
@@ -143,40 +176,58 @@ const AgentControls: React.FC<AgentControlsProps> = ({ agentType, agentName }) =
   }
   
   return (
-    <div className="flex space-x-2">
-      <Button 
-        variant={settings.isActive ? "default" : "outline"}
-        className={settings.isActive 
-          ? "bg-blue-purple-gradient hover:opacity-90 text-white"
-          : "text-white/70 border-white/20 hover:text-white hover:border-white/30 hover:bg-white/5"
-        }
-        onClick={handleToggleActive}
-      >
-        {settings.isActive ? "Active" : "Inactive"}
-      </Button>
+    <div className="space-y-2">
+      {networkError && (
+        <div className="flex items-center space-x-2 text-yellow-500 bg-yellow-500/10 p-3 rounded-md mb-4">
+          <AlertTriangle className="h-4 w-4 flex-shrink-0" />
+          <p className="text-sm">{networkError}</p>
+        </div>
+      )}
       
-      <TooltipProvider>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button 
-              variant="default"
-              className="bg-blue-purple-gradient hover:opacity-90 text-white"
-              disabled={isExecuting || !settings.isActive}
-              onClick={handleExecuteAction}
-            >
-              <Play className="h-4 w-4 mr-2" />
-              <span>{isExecuting ? 'Running...' : 'Run Agent'}</span>
-            </Button>
-          </TooltipTrigger>
-          {!settings.isActive && (
-            <TooltipContent className="bg-arthanet-charcoal text-white border-white/10">
-              <p>Please activate the agent first</p>
-            </TooltipContent>
-          )}
-        </Tooltip>
-      </TooltipProvider>
-      
-      <AgentSettingsComponent agentType={agentType} agentName={agentName} />
+      <div className="flex space-x-2">
+        <Button 
+          variant={settings.isActive ? "default" : "outline"}
+          className={settings.isActive 
+            ? "bg-blue-purple-gradient hover:opacity-90 text-white"
+            : "text-white/70 border-white/20 hover:text-white hover:border-white/30 hover:bg-white/5"
+          }
+          onClick={handleToggleActive}
+        >
+          {settings.isActive ? "Active" : "Inactive"}
+        </Button>
+        
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button 
+                variant="default"
+                className="bg-blue-purple-gradient hover:opacity-90 text-white"
+                disabled={isExecuting || !settings.isActive}
+                onClick={handleExecuteAction}
+              >
+                {isExecuting ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    <span>Running...</span>
+                  </>
+                ) : (
+                  <>
+                    <Play className="h-4 w-4 mr-2" />
+                    <span>Run Agent</span>
+                  </>
+                )}
+              </Button>
+            </TooltipTrigger>
+            {!settings.isActive && (
+              <TooltipContent className="bg-arthanet-charcoal text-white border-white/10">
+                <p>Please activate the agent first</p>
+              </TooltipContent>
+            )}
+          </Tooltip>
+        </TooltipProvider>
+        
+        <AgentSettingsComponent agentType={agentType} agentName={agentName} />
+      </div>
     </div>
   );
 };

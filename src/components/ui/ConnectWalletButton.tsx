@@ -1,6 +1,7 @@
+
 import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
-import { Wallet, ChevronDown, LogOut, Copy, ExternalLink } from 'lucide-react';
+import { Wallet, ChevronDown, LogOut, Copy, ExternalLink, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import walletService, { WalletInfo } from '@/services/walletService';
 import creditScoreService from '@/services/creditScoreService';
@@ -14,6 +15,7 @@ import {
 
 const ConnectWalletButton = () => {
   const [isConnecting, setIsConnecting] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [walletInfo, setWalletInfo] = useState<WalletInfo | null>(null);
 
   useEffect(() => {
@@ -23,6 +25,7 @@ const ConnectWalletButton = () => {
       // Only generate credit score when wallet is connected
       // but don't navigate to credit score page automatically
       if (wallet && isConnecting) {
+        console.log("Wallet connected, generating credit score");
         // Start generating credit score
         creditScoreService.generateCreditScore(wallet);
         setIsConnecting(false);
@@ -32,6 +35,7 @@ const ConnectWalletButton = () => {
     // Check if wallet is already connected, but don't navigate
     const currentWallet = walletService.getCurrentWallet();
     if (currentWallet) {
+      console.log("Wallet already connected:", currentWallet.address);
       setWalletInfo(currentWallet);
     }
 
@@ -44,6 +48,7 @@ const ConnectWalletButton = () => {
     setIsConnecting(true);
     
     try {
+      console.log("Attempting to connect wallet");
       // Try to connect to MetaMask first
       await walletService.connectWallet('MetaMask');
     } catch (error) {
@@ -53,7 +58,41 @@ const ConnectWalletButton = () => {
   };
 
   const handleDisconnect = () => {
+    console.log("Disconnecting wallet");
     walletService.disconnectWallet();
+  };
+
+  const handleRefreshBalance = async () => {
+    if (!walletInfo) return;
+    
+    setIsRefreshing(true);
+    try {
+      console.log("Refreshing wallet balance");
+      // Re-fetch wallet balance from the blockchain
+      if (window.ethereum) {
+        const balance = await window.ethereum.request({
+          method: 'eth_getBalance',
+          params: [walletInfo.address, 'latest'],
+        });
+        
+        // Update wallet info with new balance
+        const updatedWalletInfo: WalletInfo = {
+          ...walletInfo,
+          balance: walletService.weiToEth(balance)
+        };
+        
+        // Update in service and set in component
+        walletService.updateWalletInfo(updatedWalletInfo);
+        setWalletInfo(updatedWalletInfo);
+        
+        toast.success('Wallet balance updated');
+      }
+    } catch (error) {
+      console.error('Failed to refresh balance:', error);
+      toast.error('Failed to refresh balance');
+    } finally {
+      setIsRefreshing(false);
+    }
   };
 
   const truncateAddress = (address: string) => {
@@ -66,8 +105,38 @@ const ConnectWalletButton = () => {
   };
 
   const openInExplorer = (address: string) => {
-    // Default to Ethereum Mainnet, but in a real app you'd use the appropriate explorer for the current chain
-    window.open(`https://etherscan.io/address/${address}`, '_blank');
+    if (!walletInfo) return;
+    
+    // Use the chain ID to determine the appropriate explorer URL
+    const chainId = walletInfo.chainId;
+    let explorerUrl = `https://etherscan.io/address/${address}`;
+    
+    if (chainId === '0x5') {
+      explorerUrl = `https://goerli.etherscan.io/address/${address}`;
+    } else if (chainId === '0xaa36a7') {
+      explorerUrl = `https://sepolia.etherscan.io/address/${address}`;
+    } else if (chainId.startsWith('0x')) {
+      // Convert hex chainId to decimal
+      const decimalChainId = parseInt(chainId, 16);
+      
+      // Check for other known networks
+      switch (decimalChainId) {
+        case 137: // Polygon
+          explorerUrl = `https://polygonscan.com/address/${address}`;
+          break;
+        case 56: // BSC
+          explorerUrl = `https://bscscan.com/address/${address}`;
+          break;
+        case 42161: // Arbitrum
+          explorerUrl = `https://arbiscan.io/address/${address}`;
+          break;
+        case 10: // Optimism
+          explorerUrl = `https://optimistic.etherscan.io/address/${address}`;
+          break;
+      }
+    }
+    
+    window.open(explorerUrl, '_blank');
     toast.success('Opening in blockchain explorer');
   };
 
@@ -93,8 +162,28 @@ const ConnectWalletButton = () => {
             <p className="text-xs text-white/70 truncate">{walletInfo.address}</p>
           </div>
           <div className="px-4 py-2">
-            <p className="text-sm font-medium text-white">Balance</p>
-            <p className="text-xs text-white/70">{walletInfo.balance} ETH</p>
+            <p className="text-sm font-medium text-white">Network</p>
+            <p className="text-xs text-white/70">{
+              walletInfo.chainId === '0x1' ? 'Ethereum Mainnet' :
+              walletInfo.chainId === '0x5' ? 'Goerli Testnet' :
+              walletInfo.chainId === '0xaa36a7' ? 'Sepolia Testnet' :
+              `Chain ID: ${walletInfo.chainId}`
+            }</p>
+          </div>
+          <div className="px-4 py-2 flex justify-between items-center">
+            <div>
+              <p className="text-sm font-medium text-white">Balance</p>
+              <p className="text-xs text-white/70">{walletInfo.balance} ETH</p>
+            </div>
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              className="text-white/70 hover:text-white hover:bg-white/10"
+              onClick={handleRefreshBalance}
+              disabled={isRefreshing}
+            >
+              <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+            </Button>
           </div>
           <DropdownMenuSeparator className="bg-white/10" />
           <DropdownMenuItem 

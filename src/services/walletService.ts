@@ -1,3 +1,4 @@
+
 import { toast } from 'sonner';
 import { ethers } from 'ethers';
 
@@ -35,15 +36,18 @@ class WalletService {
   private initProvider() {
     if (typeof window !== 'undefined' && window.ethereum) {
       this.provider = new ethers.BrowserProvider(window.ethereum);
+      console.log("Ethereum provider initialized");
     }
   }
 
   private handleEthereumInitialized = () => {
+    console.log("Ethereum initialized event received");
     this.initProvider();
     this.checkIfWalletConnected();
   };
 
   private handleAccountsChanged = (accounts: string[]) => {
+    console.log("Accounts changed:", accounts);
     if (accounts.length === 0) {
       this.disconnectWallet();
       toast.info('Wallet disconnected');
@@ -53,6 +57,7 @@ class WalletService {
   };
 
   private handleChainChanged = () => {
+    console.log("Chain changed event received");
     if (this.currentWallet) {
       this.connectToMetaMask(); // Refresh connection
       toast.info('Network changed');
@@ -60,6 +65,7 @@ class WalletService {
   };
 
   private handleDisconnect = (error: { code: number; message: string }) => {
+    console.log("Disconnect event received:", error);
     this.disconnectWallet();
     toast.error(`Wallet disconnected: ${error.message}`);
   };
@@ -68,9 +74,13 @@ class WalletService {
     if (window.ethereum && !this.reconnecting) {
       this.reconnecting = true;
       try {
+        console.log("Checking if wallet is already connected");
         const accounts = await window.ethereum.request({ method: 'eth_accounts' });
         if (accounts && accounts.length > 0) {
+          console.log("Found connected account:", accounts[0]);
           await this.connectToMetaMask(true);
+        } else {
+          console.log("No connected accounts found");
         }
       } catch (error) {
         console.error('Error checking if wallet is connected:', error);
@@ -82,6 +92,7 @@ class WalletService {
 
   public async connectWallet(type: 'MetaMask' | 'WalletConnect' | 'Phantom'): Promise<WalletInfo | null> {
     try {
+      console.log(`Connecting to wallet type: ${type}`);
       switch (type) {
         case 'MetaMask':
           return await this.connectToMetaMask();
@@ -112,17 +123,21 @@ class WalletService {
     }
 
     try {
+      console.log("Requesting accounts from MetaMask");
       // Request accounts access
       const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+      console.log("Accounts received:", accounts);
       
       // Get current chain ID
       const chainId = await window.ethereum.request({ method: 'eth_chainId' });
+      console.log("Chain ID:", chainId);
       
       // Get account balance
       const balance = await window.ethereum.request({
         method: 'eth_getBalance',
         params: [accounts[0], 'latest'],
       });
+      console.log("Account balance (wei):", balance);
 
       // Format wallet info
       const walletInfo: WalletInfo = {
@@ -142,6 +157,7 @@ class WalletService {
       
       return walletInfo;
     } catch (error: any) {
+      console.error("Error connecting to MetaMask:", error);
       if (!silent) {
         if (error.code === 4001) {
           toast.error('User rejected the connection request');
@@ -172,6 +188,7 @@ class WalletService {
   }
 
   public disconnectWallet(): void {
+    console.log("Disconnecting wallet");
     this.currentWallet = null;
     this.notifyListeners();
     toast.success('Wallet disconnected');
@@ -181,6 +198,12 @@ class WalletService {
     return this.currentWallet;
   }
 
+  public updateWalletInfo(walletInfo: WalletInfo): void {
+    console.log("Updating wallet info:", walletInfo);
+    this.currentWallet = walletInfo;
+    this.notifyListeners();
+  }
+
   public async getEthPrice(): Promise<number> {
     const now = Date.now();
     if (this.cachedEthPrice && (now - this.lastPriceUpdate < 5 * 60 * 1000)) {
@@ -188,10 +211,12 @@ class WalletService {
     }
 
     try {
+      console.log("Fetching current ETH price");
       const response = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd');
       const data = await response.json();
       
       if (data && data.ethereum && data.ethereum.usd) {
+        console.log(`Current ETH price: $${data.ethereum.usd}`);
         this.cachedEthPrice = data.ethereum.usd;
         this.lastPriceUpdate = now;
         return this.cachedEthPrice;
@@ -199,7 +224,12 @@ class WalletService {
       throw new Error('Invalid price data from API');
     } catch (error) {
       console.error('Error fetching ETH price:', error);
-      return this.cachedEthPrice || 1800;
+      if (this.cachedEthPrice) {
+        console.log(`Using cached ETH price: $${this.cachedEthPrice}`);
+        return this.cachedEthPrice;
+      }
+      console.log("Using fallback ETH price: $1800");
+      return 1800;
     }
   }
 
@@ -228,6 +258,7 @@ class WalletService {
   }
 
   public async sendTransaction(tx: any): Promise<ethers.TransactionResponse | null> {
+    console.log("Sending transaction:", tx);
     try {
       const signer = await this.getSigner();
       if (!signer) {
@@ -236,6 +267,7 @@ class WalletService {
       }
       
       const txResponse = await signer.sendTransaction(tx);
+      console.log("Transaction response:", txResponse);
       
       toast.info('Transaction sent', {
         description: `Transaction hash: ${txResponse.hash.substring(0, 10)}...`,
@@ -281,12 +313,13 @@ class WalletService {
     this.listeners.forEach(listener => listener(this.currentWallet));
   }
 
-  private weiToEth(weiBalance: string): string {
+  public weiToEth(weiBalance: string): string {
     try {
       const wei = BigInt(weiBalance);
       const eth = Number(wei) / 1e18;
       return eth.toFixed(4);
     } catch (error) {
+      console.error("Error converting wei to ETH:", error);
       return '0.0000';
     }
   }
