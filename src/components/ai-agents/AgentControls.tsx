@@ -23,6 +23,7 @@ const AgentControls: React.FC<AgentControlsProps> = ({ agentType, agentName }) =
   const [settings, setSettings] = useState<AgentSettings | null>(null);
   const [isExecuting, setIsExecuting] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [isToggling, setIsToggling] = useState(false);
   const [networkError, setNetworkError] = useState<string | null>(null);
   
   // Check if the current network is supported for the agent
@@ -66,18 +67,41 @@ const AgentControls: React.FC<AgentControlsProps> = ({ agentType, agentName }) =
   
   // Get agent settings when wallet address or agent type changes
   useEffect(() => {
-    const fetchData = () => {
+    const fetchData = async () => {
       setIsLoading(true);
       const walletInfo = walletService.getCurrentWallet();
       
       if (walletInfo) {
         setWalletAddress(walletInfo.address);
-        const agentSettings = aiAgentService.getAgentSettings(walletInfo.address, agentType);
-        setSettings(agentSettings);
+        
+        try {
+          // Get agent settings with a timeout to prevent hanging
+          const agentSettings = await Promise.race([
+            aiAgentService.getAgentSettings(walletInfo.address, agentType),
+            new Promise<null>((_, reject) => {
+              setTimeout(() => reject(new Error('Settings fetch timeout')), 5000);
+            })
+          ]) as AgentSettings;
+          
+          setSettings(agentSettings);
+          console.log(`${agentName} settings loaded:`, agentSettings);
+        } catch (error) {
+          console.error(`Error fetching ${agentName} settings:`, error);
+          // Initialize default settings if fetch fails
+          const defaultSettings = {
+            isActive: false,
+            riskTolerance: 'medium' as const,
+            platforms: [],
+            autoRebalance: true,
+            maxGasFee: 50,
+          };
+          setSettings(defaultSettings);
+        }
       } else {
         setWalletAddress(null);
         setSettings(null);
       }
+      
       setIsLoading(false);
     };
     
@@ -87,35 +111,44 @@ const AgentControls: React.FC<AgentControlsProps> = ({ agentType, agentName }) =
     const unsubscribe = walletService.subscribe((wallet) => {
       if (wallet) {
         setWalletAddress(wallet.address);
-        const agentSettings = aiAgentService.getAgentSettings(wallet.address, agentType);
-        setSettings(agentSettings);
+        fetchData();
       } else {
         setWalletAddress(null);
         setSettings(null);
+        setIsLoading(false);
       }
-      setIsLoading(false);
     });
     
     return () => {
       unsubscribe();
     };
-  }, [agentType]);
+  }, [agentType, agentName]);
   
   // Subscribe to agent service updates
   useEffect(() => {
     if (!walletAddress) return;
     
     const unsubscribe = aiAgentService.subscribe((address, type) => {
-      if (address === walletAddress && type === agentType) {
-        const agentSettings = aiAgentService.getAgentSettings(address, agentType);
-        setSettings(agentSettings);
+      if (address === walletAddress && (!type || type === agentType)) {
+        try {
+          const updatedSettings = aiAgentService.getAgentSettings(address, agentType);
+          console.log(`Agent settings updated for ${agentName}:`, updatedSettings);
+          setSettings(updatedSettings);
+          
+          // If we were toggling and now the updated settings are received, turn off the toggling state
+          if (isToggling) {
+            setIsToggling(false);
+          }
+        } catch (error) {
+          console.error(`Error receiving ${agentName} settings update:`, error);
+        }
       }
     });
     
     return () => {
       unsubscribe();
     };
-  }, [walletAddress, agentType]);
+  }, [walletAddress, agentType, agentName, isToggling]);
   
   const handleExecuteAction = async () => {
     if (!walletAddress) {
@@ -154,14 +187,37 @@ const AgentControls: React.FC<AgentControlsProps> = ({ agentType, agentName }) =
     }
   };
   
-  const handleToggleActive = () => {
+  const handleToggleActive = async () => {
     if (!walletAddress) {
       toast.info('Please connect your wallet first');
       return;
     }
     
-    console.log(`Toggling agent ${agentType} active state to ${!settings?.isActive}`);
-    aiAgentService.toggleAgentActive(walletAddress, agentType);
+    setIsToggling(true);
+    
+    try {
+      console.log(`Toggling agent ${agentType} active state to ${!settings?.isActive}`);
+      await aiAgentService.toggleAgentActive(walletAddress, agentType);
+      
+      // Force refresh settings immediately
+      const updatedSettings = aiAgentService.getAgentSettings(walletAddress, agentType);
+      setSettings(updatedSettings);
+      console.log(`Agent settings updated after toggle:`, updatedSettings);
+      
+      // If toggle wasn't successful (isActive didn't change), show error
+      if (settings?.isActive === updatedSettings.isActive) {
+        toast.error(`Failed to ${settings?.isActive ? 'deactivate' : 'activate'} ${agentName}`, {
+          description: 'The agent status could not be updated. Please try again.'
+        });
+      }
+    } catch (error) {
+      console.error(`Error toggling ${agentName} status:`, error);
+      toast.error(`Failed to update ${agentName} status`, {
+        description: error instanceof Error ? error.message : 'Unknown error occurred'
+      });
+    } finally {
+      setIsToggling(false);
+    }
   };
   
   if (isLoading) {
@@ -212,8 +268,16 @@ const AgentControls: React.FC<AgentControlsProps> = ({ agentType, agentName }) =
             : "text-white/70 border-white/20 hover:text-white hover:border-white/30 hover:bg-white/5"
           }
           onClick={handleToggleActive}
+          disabled={isToggling}
         >
-          {settings.isActive ? "Active" : "Inactive"}
+          {isToggling ? (
+            <>
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              <span>Updating...</span>
+            </>
+          ) : (
+            settings.isActive ? "Active" : "Inactive"
+          )}
         </Button>
         
         <TooltipProvider>
