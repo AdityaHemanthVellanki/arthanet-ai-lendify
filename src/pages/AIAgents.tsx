@@ -1,5 +1,6 @@
+
 import React, { useEffect, useState } from 'react';
-import { useNavigate, Routes, Route, Link, Outlet } from 'react-router-dom';
+import { useNavigate, Routes, Route, Link } from 'react-router-dom';
 import Navbar from '@/components/layout/Navbar';
 import Footer from '@/components/layout/Footer';
 import GlassCard from '@/components/ui/GlassCard';
@@ -15,18 +16,26 @@ import { Button } from '@/components/ui/button';
 // Define the main AI Agents page
 const AgentsHome = () => {
   const [isWalletConnected, setIsWalletConnected] = useState(false);
+  const [isCheckingWallet, setIsCheckingWallet] = useState(true);
   const navigate = useNavigate();
 
   useEffect(() => {
     window.scrollTo(0, 0);
     
     // Check if wallet is already connected first
-    const currentWallet = walletService.getCurrentWallet();
-    setIsWalletConnected(!!currentWallet);
+    const checkWalletConnection = async () => {
+      setIsCheckingWallet(true);
+      const currentWallet = walletService.getCurrentWallet();
+      setIsWalletConnected(!!currentWallet);
+      setIsCheckingWallet(false);
+    };
+    
+    checkWalletConnection();
     
     // Then subscribe to future changes
     const unsubscribe = walletService.subscribe((wallet) => {
       setIsWalletConnected(!!wallet);
+      setIsCheckingWallet(false);
     });
 
     return () => {
@@ -143,13 +152,24 @@ const AgentsHome = () => {
                 maximize yields, and minimize risks across multiple protocols.
               </motion.p>
 
-              {!isWalletConnected && (
+              {!isWalletConnected && !isCheckingWallet && (
                 <motion.div
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ duration: 0.6, delay: 0.6 }}
                 >
                   <ConnectWalletButton />
+                </motion.div>
+              )}
+              
+              {isCheckingWallet && (
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.6, delay: 0.6 }}
+                  className="flex justify-center"
+                >
+                  <div className="w-8 h-8 border-t-2 border-arthanet-blue rounded-full animate-spin"></div>
                 </motion.div>
               )}
             </div>

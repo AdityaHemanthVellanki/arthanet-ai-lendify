@@ -22,15 +22,27 @@ const AgentControls: React.FC<AgentControlsProps> = ({ agentType, agentName }) =
   const [walletAddress, setWalletAddress] = useState<string | null>(null);
   const [settings, setSettings] = useState<AgentSettings | null>(null);
   const [isExecuting, setIsExecuting] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   
   // Get agent settings when wallet address or agent type changes
   useEffect(() => {
-    const walletInfo = walletService.getCurrentWallet();
-    if (walletInfo) {
-      setWalletAddress(walletInfo.address);
-      const agentSettings = aiAgentService.getAgentSettings(walletInfo.address, agentType);
-      setSettings(agentSettings);
-    }
+    const fetchData = () => {
+      setIsLoading(true);
+      const walletInfo = walletService.getCurrentWallet();
+      
+      if (walletInfo) {
+        setWalletAddress(walletInfo.address);
+        const agentSettings = aiAgentService.getAgentSettings(walletInfo.address, agentType);
+        setSettings(agentSettings);
+      } else {
+        setWalletAddress(null);
+        setSettings(null);
+      }
+      setIsLoading(false);
+    };
+    
+    // Fetch data immediately
+    fetchData();
     
     const unsubscribe = walletService.subscribe((wallet) => {
       if (wallet) {
@@ -41,6 +53,7 @@ const AgentControls: React.FC<AgentControlsProps> = ({ agentType, agentName }) =
         setWalletAddress(null);
         setSettings(null);
       }
+      setIsLoading(false);
     });
     
     return () => {
@@ -98,6 +111,21 @@ const AgentControls: React.FC<AgentControlsProps> = ({ agentType, agentName }) =
     aiAgentService.toggleAgentActive(walletAddress, agentType);
   };
   
+  if (isLoading) {
+    return (
+      <div className="flex space-x-2">
+        <Button 
+          variant="outline" 
+          className="text-white/50 border-white/10"
+          disabled
+        >
+          <div className="w-4 h-4 border-t-2 border-current rounded-full animate-spin mr-2"></div>
+          <span>Loading...</span>
+        </Button>
+      </div>
+    );
+  }
+  
   if (!settings) {
     return (
       <div className="flex space-x-2">
@@ -107,7 +135,7 @@ const AgentControls: React.FC<AgentControlsProps> = ({ agentType, agentName }) =
           disabled
         >
           <Play className="h-4 w-4 mr-2" />
-          <span>Run Agent</span>
+          <span>Connect Wallet</span>
         </Button>
         <AgentSettingsComponent agentType={agentType} agentName={agentName} />
       </div>

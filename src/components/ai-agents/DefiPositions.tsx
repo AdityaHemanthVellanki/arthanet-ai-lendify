@@ -24,21 +24,36 @@ import {
 import { Progress } from '@/components/ui/progress';
 import aiAgentService, { DefiPosition } from '@/services/aiAgentService';
 import walletService from '@/services/walletService';
+import { cn } from "@/lib/utils";
 
 const DefiPositionsComponent = () => {
   const [walletAddress, setWalletAddress] = useState<string | null>(null);
   const [positions, setPositions] = useState<DefiPosition[]>([]);
   const [isOpen, setIsOpen] = useState(true);
+  const [isLoading, setIsLoading] = useState(true);
   
   // Get positions when wallet address changes
   useEffect(() => {
-    const walletInfo = walletService.getCurrentWallet();
-    if (walletInfo) {
-      setWalletAddress(walletInfo.address);
-      const defiPositions = aiAgentService.getDefiPositions(walletInfo.address);
-      setPositions(defiPositions);
-    }
+    const fetchData = () => {
+      setIsLoading(true);
+      const walletInfo = walletService.getCurrentWallet();
+      
+      if (walletInfo) {
+        setWalletAddress(walletInfo.address);
+        // In a real implementation, this would fetch on-chain data
+        const defiPositions = aiAgentService.getDefiPositions(walletInfo.address);
+        setPositions(defiPositions);
+      } else {
+        setWalletAddress(null);
+        setPositions([]);
+      }
+      setIsLoading(false);
+    };
     
+    // Fetch data immediately
+    fetchData();
+    
+    // Subscribe to wallet changes
     const unsubscribe = walletService.subscribe((wallet) => {
       if (wallet) {
         setWalletAddress(wallet.address);
@@ -48,6 +63,7 @@ const DefiPositionsComponent = () => {
         setWalletAddress(null);
         setPositions([]);
       }
+      setIsLoading(false);
     });
     
     return () => {
@@ -71,9 +87,18 @@ const DefiPositionsComponent = () => {
     };
   }, [walletAddress]);
   
+  if (isLoading) {
+    return (
+      <div className="glass-card p-6 text-center">
+        <Activity className="h-10 w-10 mx-auto mb-2 text-arthanet-blue animate-pulse" />
+        <p className="text-white/70">Loading on-chain data...</p>
+      </div>
+    );
+  }
+  
   if (!walletAddress) {
     return (
-      <div className="w-full p-6 text-center">
+      <div className="glass-card p-6 text-center">
         <div className="text-white/50">
           <BarChart3 className="h-10 w-10 mx-auto mb-2 opacity-30" />
           <p>Connect wallet to view DeFi positions</p>
@@ -162,7 +187,12 @@ const DefiPositionsComponent = () => {
                       </div>
                       <span className="text-sm font-medium text-green-500">{position.apy}%</span>
                     </div>
-                    <Progress value={position.apy * 5} className="h-1.5 bg-white/10" indicatorClassName="bg-gradient-to-r from-green-500 to-teal-400" />
+                    <Progress 
+                      value={position.apy * 5} 
+                      className="h-1.5 bg-white/10" 
+                      // Use cn utility to combine classes conditionally
+                      indicatorClassName={cn("bg-gradient-to-r from-green-500 to-teal-400")}
+                    />
                   </div>
                   
                   <div>
@@ -195,11 +225,11 @@ const DefiPositionsComponent = () => {
                     <Progress 
                       value={position.risk * 10} 
                       className="h-1.5 bg-white/10" 
-                      indicatorClassName={`${
+                      indicatorClassName={cn(
                         position.risk <= 3 ? 'bg-green-500' :
                         position.risk <= 6 ? 'bg-yellow-500' :
                         'bg-red-500'
-                      }`}
+                      )}
                     />
                   </div>
                 </div>

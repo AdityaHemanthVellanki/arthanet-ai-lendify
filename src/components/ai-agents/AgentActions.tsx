@@ -29,15 +29,28 @@ const AgentActionsComponent: React.FC<AgentActionsProps> = ({ agentType }) => {
   const [walletAddress, setWalletAddress] = useState<string | null>(null);
   const [actions, setActions] = useState<AgentAction[]>([]);
   const [isOpen, setIsOpen] = useState(true);
+  const [isLoading, setIsLoading] = useState(true);
   
   // Get actions when wallet address or agent type changes
   useEffect(() => {
-    const walletInfo = walletService.getCurrentWallet();
-    if (walletInfo) {
-      setWalletAddress(walletInfo.address);
-      const agentActions = aiAgentService.getAgentActions(walletInfo.address, agentType);
-      setActions(agentActions);
-    }
+    const fetchData = () => {
+      setIsLoading(true);
+      const walletInfo = walletService.getCurrentWallet();
+      
+      if (walletInfo) {
+        setWalletAddress(walletInfo.address);
+        // Fetch actions for the current agent
+        const agentActions = aiAgentService.getAgentActions(walletInfo.address, agentType);
+        setActions(agentActions);
+      } else {
+        setWalletAddress(null);
+        setActions([]);
+      }
+      setIsLoading(false);
+    };
+    
+    // Fetch data immediately
+    fetchData();
     
     const unsubscribe = walletService.subscribe((wallet) => {
       if (wallet) {
@@ -48,6 +61,7 @@ const AgentActionsComponent: React.FC<AgentActionsProps> = ({ agentType }) => {
         setWalletAddress(null);
         setActions([]);
       }
+      setIsLoading(false);
     });
     
     return () => {
@@ -71,9 +85,18 @@ const AgentActionsComponent: React.FC<AgentActionsProps> = ({ agentType }) => {
     };
   }, [walletAddress, agentType]);
   
+  if (isLoading) {
+    return (
+      <div className="glass-card p-6 text-center">
+        <Activity className="h-10 w-10 mx-auto mb-2 text-arthanet-blue animate-pulse" />
+        <p className="text-white/70">Loading on-chain activity...</p>
+      </div>
+    );
+  }
+  
   if (!walletAddress) {
     return (
-      <div className="w-full p-6 text-center">
+      <div className="glass-card p-6 text-center">
         <div className="text-white/50">
           <Activity className="h-10 w-10 mx-auto mb-2 opacity-30" />
           <p>Connect wallet to view agent activity</p>
