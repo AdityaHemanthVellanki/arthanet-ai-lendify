@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { 
   Activity, 
@@ -25,7 +24,8 @@ import {
 } from 'recharts';
 import aiAgentService, { AgentType, AgentAnalytics } from '@/services/aiAgentService';
 import walletService from '@/services/walletService';
-import creditScoreService, { HistoricalRiskData } from '@/services/creditScoreService';
+import creditScoreService from '@/services/creditScoreService';
+import { HistoricalRiskData } from '@/types/creditScore';
 
 interface AgentAnalyticsProps {
   agentType: AgentType;
@@ -42,7 +42,6 @@ const AgentAnalyticsComponent: React.FC<AgentAnalyticsProps> = ({
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isChartLoading, setIsChartLoading] = useState<boolean>(true);
   
-  // Get analytics when wallet address or agent type changes
   useEffect(() => {
     const walletInfo = walletService.getCurrentWallet();
     if (walletInfo) {
@@ -66,7 +65,6 @@ const AgentAnalyticsComponent: React.FC<AgentAnalyticsProps> = ({
     };
   }, [agentType]);
   
-  // Subscribe to agent service updates
   useEffect(() => {
     if (!walletAddress) return;
     
@@ -81,17 +79,14 @@ const AgentAnalyticsComponent: React.FC<AgentAnalyticsProps> = ({
     };
   }, [walletAddress, agentType]);
   
-  // Fetch analytics and chart data
   const fetchAnalyticsData = async (address: string) => {
     setIsLoading(true);
     setIsChartLoading(true);
     
     try {
-      // Fetch agent analytics
       const agentAnalytics = await aiAgentService.fetchAgentAnalytics(address, agentType);
       setAnalytics(agentAnalytics);
       
-      // Fetch chart data based on agent type
       await fetchChartData(address, agentAnalytics);
     } catch (error) {
       console.error(`Error fetching data for ${agentType}:`, error);
@@ -100,11 +95,9 @@ const AgentAnalyticsComponent: React.FC<AgentAnalyticsProps> = ({
     }
   };
   
-  // Fetch appropriate chart data based on agent type
   const fetchChartData = async (address: string, analyticsData: AgentAnalytics | null) => {
     try {
       if (agentType === 'risk-analyzer') {
-        // For risk analyzer, use real historical risk data
         const historicalData = await creditScoreService.getHistoricalRiskData(address);
         
         if (historicalData.length === 0) {
@@ -116,12 +109,11 @@ const AgentAnalyticsComponent: React.FC<AgentAnalyticsProps> = ({
         
         const formattedData = historicalData.map(item => ({
           date: format(item.date, 'MMM dd'),
-          value: item.value * 500 // Scale to match the expected TVL range
+          value: item.value * 500
         }));
         
         setChartData(formattedData);
       } else {
-        // For other agent types, fetch historical transactions from the blockchain
         await fetchTransactionBasedChartData(address, analyticsData);
       }
     } catch (error) {
@@ -132,7 +124,6 @@ const AgentAnalyticsComponent: React.FC<AgentAnalyticsProps> = ({
     }
   };
   
-  // Fetch transaction-based chart data for non-risk-analyzer agents
   const fetchTransactionBasedChartData = async (
     address: string, 
     analyticsData: AgentAnalytics | null
@@ -148,28 +139,19 @@ const AgentAnalyticsComponent: React.FC<AgentAnalyticsProps> = ({
         throw new Error('No provider available');
       }
       
-      // Get contract based on agent type
       const contractAddress = aiAgentService.getContractAddress(agentType);
       const currentBlock = await provider.getBlockNumber();
       
-      // Fetch historical events specific to this agent type
-      const blocksPerDay = 7200; // ~7200 blocks per day on Ethereum
+      const blocksPerDay = 7200;
       const daysToLookBack = 30;
       const fromBlock = Math.max(0, currentBlock - (blocksPerDay * daysToLookBack));
       
-      // Map of dates to values for chart data
       const dateValueMap = new Map<string, number>();
       const baseValue = analyticsData.totalValueLocked;
       
-      // Initialize with current value
       const today = format(new Date(), 'MMM dd');
       dateValueMap.set(today, baseValue);
       
-      // Fetch agent-specific events or transactions
-      // In a real implementation, you would fetch relevant events from the agent contract
-      // For this example, we'll use general transactions as a proxy
-      
-      // Get transaction history for the wallet
       const transactionData = await aiAgentService.getTransactionHistory(
         address, 
         agentType, 
@@ -178,18 +160,12 @@ const AgentAnalyticsComponent: React.FC<AgentAnalyticsProps> = ({
       );
       
       if (transactionData && transactionData.length > 0) {
-        // Process transaction data into chart points
         transactionData.forEach(tx => {
           const txDate = format(new Date(tx.timestamp * 1000), 'MMM dd');
           
-          // Calculate value based on real transaction data
-          // This could be the actual value locked at that time, 
-          // or derived from transaction amount and direction
           let value = baseValue;
           
           if (tx.amount) {
-            // If this was a deposit, value would have been lower before
-            // If this was a withdrawal, value would have been higher before
             if (tx.direction === 'in') {
               value = baseValue - Number(tx.amount);
             } else {
@@ -197,27 +173,22 @@ const AgentAnalyticsComponent: React.FC<AgentAnalyticsProps> = ({
             }
           }
           
-          // Only update if this provides an earlier data point or a more significant change
           if (!dateValueMap.has(txDate) || Math.abs(dateValueMap.get(txDate)! - value) > 100) {
             dateValueMap.set(txDate, value);
           }
         });
       } else {
-        // If no transactions found, use current value with slight variations based on market data
-        // This is still based on real data (market conditions), not random numbers
         for (let i = daysToLookBack; i > 0; i--) {
           const date = new Date();
           date.setDate(date.getDate() - i);
           const formattedDate = format(date, 'MMM dd');
           
-          // Get market conditions for that date if possible
           const marketAdjustment = await aiAgentService.getMarketAdjustment(date, agentType);
           
           dateValueMap.set(formattedDate, baseValue * marketAdjustment);
         }
       }
       
-      // Convert map to array and sort by date
       const data = Array.from(dateValueMap.entries())
         .map(([date, value]) => ({ date, value }))
         .sort((a, b) => {

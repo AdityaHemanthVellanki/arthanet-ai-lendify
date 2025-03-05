@@ -8,7 +8,8 @@ import { motion } from 'framer-motion';
 import { Lock, Wallet, Activity, BarChart3, History, ArrowRight, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import walletService, { WalletInfo } from '@/services/walletService';
-import creditScoreService, { CreditScoreData } from '@/services/creditScoreService';
+import creditScoreService from '@/services/creditScoreService';
+import { CreditScoreData } from '@/types/creditScore';
 import { Button } from '@/components/ui/button';
 
 const CreditScore = () => {
